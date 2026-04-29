@@ -180,3 +180,31 @@ def test_digest_infers_common_source_name_from_url_for_older_rows(db_session) ->
 
     assert digest is not None
     assert digest.listings[0].source_name == "eBay"
+
+
+def test_listing_history_includes_sent_rows(db_session) -> None:
+    user = UserRepository(db_session).get_or_create_by_discord_id("123")
+    watch = WatchRepository(db_session).create_watch(
+        user_id=user.id,
+        name="C5 digest",
+        query="C5 Corvette",
+        included_keywords=["manual"],
+    )
+    source = SourceRepository(db_session).create_source(name="Mock Cars")
+    listing_repository = ListingRepository(db_session)
+    listing, _ = listing_repository.insert_listing_if_new(
+        source_id=source.id,
+        listing=ListingCandidate(title="C5 Corvette manual", url="https://example.test/c5"),
+        score_result=ScoreResult(score=10, is_match=True, reasons=["keyword matched"]),
+        converted_price_amount=None,
+        converted_price_currency=None,
+        converted_mileage_value=None,
+        converted_mileage_unit=None,
+    )
+    listing_repository.add_listing_to_watch(watch, listing)
+    listing_repository.mark_listings_as_notified(watch.id, [listing.id])
+
+    digest = DigestService(listing_repository).build_listing_history(watch)
+
+    assert digest is not None
+    assert digest.listing_count == 1

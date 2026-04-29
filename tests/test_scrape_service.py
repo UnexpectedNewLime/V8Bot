@@ -5,7 +5,8 @@ from decimal import Decimal
 
 from sqlalchemy import func, select
 
-from car_watch_bot.db.models import Listing, ScrapeAttempt
+from car_watch_bot.core.models import ListingCandidate
+from car_watch_bot.db.models import Listing, ScrapeAttempt, WatchListing
 from car_watch_bot.db.repositories import (
     ListingRepository,
     ScrapeAttemptRepository,
@@ -16,6 +17,16 @@ from car_watch_bot.db.repositories import (
 from car_watch_bot.scrapers.base import ScrapeRequest
 from car_watch_bot.scrapers.mock import MockScraper
 from car_watch_bot.services.scrape_service import ScrapeService
+
+
+class MutableScraper:
+    """Test scraper whose candidates can change between runs."""
+
+    def __init__(self, candidates: list[ListingCandidate]) -> None:
+        self.candidates = candidates
+
+    async def fetch_listings(self, request: ScrapeRequest) -> list[ListingCandidate]:
+        return self.candidates
 
 
 def _create_c5_watch_with_mock_source(db_session) -> tuple[int, int]:
@@ -102,3 +113,86 @@ def test_excluded_keyword_listing_is_not_persisted(db_session) -> None:
 
     titles = list(db_session.scalars(select(Listing.title)))
     assert "2001 Corvette C5 automatic convertible" not in titles
+
+
+def test_repeated_scrape_refreshes_existing_listing_description_and_score(
+    db_session,
+) -> None:
+    watch_id, _ = _create_c5_watch_with_mock_source(db_session)
+    scraper = MutableScraper(
+        [
+            ListingCandidate(
+                title="C5 Corvette",
+                url="https://example.test/c5",
+                description="manual coupe",
+            )
+        ]
+    )
+    service = ScrapeService(
+        watch_repository=WatchRepository(db_session),
+        source_repository=SourceRepository(db_session),
+        listing_repository=ListingRepository(db_session),
+        scrape_attempt_repository=ScrapeAttemptRepository(db_session),
+        scraper_adapters={"mock": scraper},
+        usd_to_aud_rate=Decimal("1.50"),
+    )
+
+    asyncio.run(service.run_once())
+    scraper.candidates = [
+        ListingCandidate(
+            title="C5 Corvette",
+            url="https://example.test/c5",
+            description="manual coupe with HUD and targa roof",
+        )
+    ]
+    asyncio.run(service.run_once())
+
+    listing = ListingRepository(db_session).list_unnotified_for_watch(watch_id)[0]
+    assert listing.description == "manual coupe with HUD and targa roof"
+    assert "keyword matched: HUD" in listing.score_reasons
+    assert "keyword matched: targa" in listing.score_reasons
+
+
+def test_excluded_keyword_removes_existing_pending_listing(db_session) -> None:
+    watch_id, _ = _create_c5_watch_with_mock_source(db_session)
+    scraper = MutableScraper(
+        [
+            ListingCandidate(
+                title="C5 Corvette",
+                url="https://example.test/c5",
+                description="manual coupe",
+            )
+        ]
+    )
+    service = ScrapeService(
+        watch_repository=WatchRepository(db_session),
+        source_repository=SourceRepository(db_session),
+        listing_repository=ListingRepository(db_session),
+        scrape_attempt_repository=ScrapeAttemptRepository(db_session),
+        scraper_adapters={"mock": scraper},
+        usd_to_aud_rate=Decimal("1.50"),
+    )
+
+    asyncio.run(service.run_once())
+    scraper.candidates = [
+        ListingCandidate(
+            title="C5 Corvette",
+            url="https://example.test/c5",
+            description="manual coupe automatic",
+        )
+    ]
+    asyncio.run(service.run_once())
+
+    assert ListingRepository(db_session).list_unnotified_for_watch(watch_id) == []
+    listing = db_session.scalar(select(Listing).where(Listing.url == "https://example.test/c5"))
+    assert listing is not None
+    assert listing.description == "manual coupe automatic"
+    assert "excluded keyword: automatic" in listing.score_reasons
+    watch_listing = db_session.scalar(
+        select(WatchListing).where(
+            WatchListing.watch_id == watch_id,
+            WatchListing.listing_id == listing.id,
+        )
+    )
+    assert watch_listing is not None
+    assert watch_listing.status == "excluded"

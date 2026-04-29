@@ -438,11 +438,12 @@ def _queue_item_to_listing(
     mileage_value = _extract_queue_mileage(str(item.get("mileage") or ""))
     listing_source_name = str(item.get("sourceName") or source_name)
     external_id = _queue_external_id(item)
+    description = _queue_description(item)
     return ListingCandidate(
         external_id=external_id,
         title=title,
         url=url,
-        description=_queue_description(item),
+        description=description,
         price_amount=price_amount,
         price_currency="USD" if price_amount is not None else None,
         mileage_value=mileage_value,
@@ -456,7 +457,7 @@ def _queue_item_to_listing(
             "backend_sitecode": item.get("backendSitecode"),
             "sitecode": item.get("sitecode"),
             "vin": item.get("vin"),
-            "raw_text": _queue_description(item),
+            "raw_text": description,
             "warnings": _field_warnings(price_amount, mileage_value),
             "errors": [],
         },
@@ -485,7 +486,83 @@ def _queue_description(item: dict[str, Any]) -> str:
         item.get("dealerName"),
         item.get("sourceName"),
     ]
+    fields.extend(_queue_detail_texts(item))
     return _clean_text(" ".join(str(field) for field in fields if field))
+
+
+def _queue_detail_texts(item: dict[str, Any]) -> list[str]:
+    """Extract descriptive queue fields used for keyword matching."""
+
+    texts: list[str] = []
+    details_text = _queue_details_text(item)
+    if details_text:
+        texts.append(details_text)
+    detail_keys = [
+        "description",
+        "vehicleDescription",
+        "sellerDescription",
+        "dealerDescription",
+        "sellerComments",
+        "comments",
+        "comment",
+        "subtitle",
+        "subTitle",
+        "tagline",
+        "headline",
+        "transmission",
+        "engine",
+        "drivetrain",
+        "exteriorColor",
+        "interiorColor",
+        "features",
+        "options",
+        "highlights",
+    ]
+    for key in detail_keys:
+        texts.extend(_string_values(item.get(key)))
+    return texts
+
+
+def _queue_details_text(item: dict[str, Any]) -> str | None:
+    """Combine AutoTempest's split visible details snippet."""
+
+    text = "".join(
+        str(item.get(key) or "")
+        for key in ("detailsShort", "detailsMid", "detailsLong", "detailsExtraLong")
+    )
+    cleaned_text = _clean_html_text(text)
+    return cleaned_text or None
+
+
+def _string_values(value: Any) -> list[str]:
+    """Flatten common JSON text shapes without including unrelated fields."""
+
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = _clean_html_text(value)
+        return [text] if text else []
+    if isinstance(value, (int, float, bool)):
+        return []
+    if isinstance(value, list):
+        texts: list[str] = []
+        for entry in value:
+            texts.extend(_string_values(entry))
+        return texts
+    if isinstance(value, dict):
+        texts: list[str] = []
+        for nested_key in ("name", "label", "title", "description", "value", "text"):
+            texts.extend(_string_values(value.get(nested_key)))
+        return texts
+    return []
+
+
+def _clean_html_text(text: str) -> str:
+    """Normalize text that may contain short HTML snippets."""
+
+    if "<" in text and ">" in text:
+        return _clean_text(BeautifulSoup(text, "html.parser").get_text(" ", strip=True))
+    return _clean_text(text)
 
 
 def _is_http_url(url: str) -> bool:

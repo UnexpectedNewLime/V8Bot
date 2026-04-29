@@ -5,6 +5,7 @@ from pathlib import Path
 
 import httpx
 
+from car_watch_bot.core.scoring import score_listing
 from car_watch_bot.scrapers.autotempest import AutoTempestScraper
 from car_watch_bot.scrapers.base import ScrapeRequest
 
@@ -186,10 +187,46 @@ def test_fetch_uses_queue_results_for_exact_vehicle_links() -> None:
     assert listings[0].mileage_value == 54222
     assert listings[0].location_text == "Lake Havasu City, AZ"
     assert listings[0].source_name == "Cars.com"
+    assert listings[0].description is not None
+    assert "Torch Red interior" in listings[0].description
+    assert "Recent Arrival!" in listings[0].description
+    assert "Adjustable Sport Buckets" in listings[0].description
+    assert "Removable targa roof" in listings[0].description
     assert listings[0].raw_payload is not None
     assert listings[0].raw_payload["candidate_type"] == "queue_result"
     assert "skipped Facebook Marketplace source" in scraper.last_warnings
     assert any("/queue-results" in request for request in requests)
+
+
+def test_queue_result_description_text_is_available_for_keyword_matching() -> None:
+    queue_item = {
+        "title": "2001 Chevrolet Corvette",
+        "url": "https://www.cars.com/vehicledetail/example/",
+        "price": "$23,900",
+        "mileage": "76,200",
+        "location": "Maggie Valley, NC",
+        "sourceName": "Cars.com",
+        "description": "Sequential-Port FI with a 6-speed manual transmission.",
+        "features": [{"name": "Torch Red/Black Z06 graphics"}, "Heads-up display"],
+        "externalId": "example",
+    }
+    scraper = AutoTempestScraper(user_agent="V8Bot test")
+
+    listings = scraper._parse_queue_results(
+        {"results": [queue_item]},
+        source_code="cm",
+        source_name="AutoTempest",
+    )
+    result = score_listing(
+        listings[0],
+        car_query="Corvette",
+        keywords=["manual", "heads-up"],
+        excluded_keywords=["automatic"],
+    )
+
+    assert result.is_match is True
+    assert "keyword matched: manual" in result.reasons
+    assert "keyword matched: heads-up" in result.reasons
 
 
 def test_search_shell_does_not_create_fake_listing_from_search_url() -> None:

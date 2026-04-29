@@ -25,6 +25,34 @@ class DigestService:
         """Build a digest payload from persisted pending listings."""
 
         listings = self.listing_repository.list_unnotified_for_watch(watch.id)
+        return self._build_digest_from_listings(watch, listings)
+
+    def build_digest_for_listing_ids(
+        self,
+        watch: Watch,
+        listing_ids: list[int],
+    ) -> DigestPayload | None:
+        """Build a digest payload for selected pending listing IDs."""
+
+        listings = self.listing_repository.list_unnotified_for_watch_listing_ids(
+            watch.id,
+            listing_ids,
+        )
+        return self._build_digest_from_listings(watch, listings)
+
+    def build_listing_history(self, watch: Watch) -> DigestPayload | None:
+        """Build a listing payload for all non-excluded watch listings."""
+
+        listings = self.listing_repository.list_visible_for_watch(watch.id)
+        return self._build_digest_from_listings(watch, listings)
+
+    def _build_digest_from_listings(
+        self,
+        watch: Watch,
+        listings: list[Listing],
+    ) -> DigestPayload | None:
+        """Build a digest payload from listing rows."""
+
         if not listings:
             return None
         digest_listings = [self._format_listing(listing) for listing in listings]

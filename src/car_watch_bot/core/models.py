@@ -97,3 +97,4 @@ class ScrapeNowResult:
     listings_created: int
     pending_listings: int
     warnings: list[str]
+    new_listing_ids: list[int]
