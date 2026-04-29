@@ -393,3 +393,7 @@ Start with:
 - `docs/00-read-this-first.md`
 - `docs/08-style-guide.md`
 - `docs/09-engineering-principles.md`
+
+## TODO
+-Move all messages to post in a thread to avoid spam
+-Have different watches on different threads
