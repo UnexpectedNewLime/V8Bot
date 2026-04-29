@@ -393,5 +393,3 @@ Start with:
 - `docs/00-read-this-first.md`
 - `docs/08-style-guide.md`
 - `docs/09-engineering-principles.md`
-- `docs/12-autotempest-source-of-truth.md`
-- `docs/13-ralph-loop.md`
