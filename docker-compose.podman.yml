@@ -1,4 +1,0 @@
-services:
-  car-watch-bot:
-    volumes:
-      - ./data:/data:U
