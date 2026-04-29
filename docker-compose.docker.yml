@@ -1,0 +1,5 @@
+services:
+  car-watch-bot:
+    image: car-watch-bot:local
+    volumes:
+      - ./data:/data

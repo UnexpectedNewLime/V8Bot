@@ -243,11 +243,15 @@ select id, name, kind, base_url, is_active from sources;
 select id, title, url, price_amount, mileage_value from listings;
 ```
 
-## Docker Deployment
+## Podman Deployment
 
-The Docker setup is intended for local or Proxmox-style deployment. It uses
-Python 3.11, installs `requirements.txt`, loads configuration from `.env`, and
-stores SQLite data in `./data` on the host.
+Podman is the default container engine for local or Proxmox-style deployment.
+The setup uses Python 3.11, installs `requirements.txt`, loads configuration
+from `.env`, and stores SQLite data in `./data` on the host.
+
+The default compose file is rootless-Podman friendly. It uses the `:U` volume
+flag so the non-root container user can write the SQLite database under
+`./data`.
 
 Prepare:
 
@@ -263,7 +267,7 @@ DISCORD_BOT_TOKEN=<prod bot token>
 DISCORD_GUILD_ID=<prod or test server id>
 ```
 
-In Docker Compose, `DATABASE_URL` is overridden to:
+In Compose, `DATABASE_URL` is overridden to:
 
 ```text
 sqlite:////data/car_watch_bot.sqlite3
@@ -274,71 +278,13 @@ This maps to `./data/car_watch_bot.sqlite3` on the host.
 Build:
 
 ```bash
-docker compose build
+podman-compose build
 ```
 
 Start:
 
 ```bash
-docker compose up -d
-```
-
-View logs:
-
-```bash
-docker compose logs -f car-watch-bot
-```
-
-Stop:
-
-```bash
-docker compose down
-```
-
-Update after `git pull`:
-
-```bash
-git pull
-docker compose build
-docker compose up -d
-docker compose logs -f car-watch-bot
-```
-
-Verify persistence:
-
-```bash
-sqlite3 data/car_watch_bot.sqlite3 ".tables"
-```
-
-Persistent data:
-
-- SQLite database: `./data/car_watch_bot.sqlite3`
-- Application logs: stdout/stderr via `docker compose logs`
-
-No ports are exposed. Discord bots connect outbound to Discord.
-
-## Podman Deployment
-
-For rootless Podman, use the Podman override file. It adds the `:U` volume flag
-so the non-root container user can write the SQLite database under `./data`.
-
-Check tooling:
-
-```bash
-podman --version
-podman-compose version
-```
-
-Build:
-
-```bash
-podman-compose -f docker-compose.yml -f docker-compose.podman.yml build
-```
-
-Start:
-
-```bash
-podman-compose -f docker-compose.yml -f docker-compose.podman.yml up -d
+podman-compose up -d
 ```
 
 View status:
@@ -350,22 +296,22 @@ podman ps
 View logs:
 
 ```bash
-podman-compose -f docker-compose.yml -f docker-compose.podman.yml logs -f car-watch-bot
+podman-compose logs -f car-watch-bot
 ```
 
 Stop:
 
 ```bash
-podman-compose -f docker-compose.yml -f docker-compose.podman.yml down
+podman-compose down
 ```
 
 Update after `git pull`:
 
 ```bash
 git pull
-podman-compose -f docker-compose.yml -f docker-compose.podman.yml build
-podman-compose -f docker-compose.yml -f docker-compose.podman.yml up -d
-podman-compose -f docker-compose.yml -f docker-compose.podman.yml logs -f car-watch-bot
+podman-compose build
+podman-compose up -d
+podman-compose logs -f car-watch-bot
 ```
 
 Verify persistence:
@@ -374,9 +320,67 @@ Verify persistence:
 sqlite3 data/car_watch_bot.sqlite3 ".tables"
 ```
 
+Persistent data:
+
+- SQLite database: `./data/car_watch_bot.sqlite3`
+- Application logs: stdout/stderr via `podman-compose logs`
+
+No ports are exposed. Discord bots connect outbound to Discord.
+
 On older Podman versions, you may see a CNI firewall config warning. If the
 container starts, connects to Discord, and writes the SQLite database, that
 warning is not blocking runtime.
+
+## Docker Deployment
+
+Docker is supported as a secondary runtime. Use the Docker override file because
+Docker does not support Podman's `:U` volume option.
+
+Check tooling:
+
+```bash
+docker --version
+docker compose version
+```
+
+Build:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.docker.yml build
+```
+
+Start:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.docker.yml up -d
+```
+
+View logs:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.docker.yml logs -f car-watch-bot
+```
+
+Stop:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.docker.yml down
+```
+
+Update after `git pull`:
+
+```bash
+git pull
+docker compose -f docker-compose.yml -f docker-compose.docker.yml build
+docker compose -f docker-compose.yml -f docker-compose.docker.yml up -d
+docker compose -f docker-compose.yml -f docker-compose.docker.yml logs -f car-watch-bot
+```
+
+Verify persistence:
+
+```bash
+sqlite3 data/car_watch_bot.sqlite3 ".tables"
+```
 
 ## Production Notes
 

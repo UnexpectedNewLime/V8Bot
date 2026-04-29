@@ -1,7 +1,9 @@
 services:
   car-watch-bot:
-    build: .
-    image: car-watch-bot:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: localhost/car-watch-bot:local
     container_name: car-watch-bot
     restart: unless-stopped
     env_file:
@@ -9,4 +11,4 @@ services:
     environment:
       DATABASE_URL: sqlite:////data/car_watch_bot.sqlite3
     volumes:
-      - ./data:/data
+      - ./data:/data:U
