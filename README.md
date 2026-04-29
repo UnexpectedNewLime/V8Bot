@@ -177,6 +177,8 @@ This command will:
 - print stored pending listings as JSON
 
 To reuse an existing watch:
+-Move all messages to post in a thread to avoid spam -Have different watches on different threads
+
 
 ```bash
 PYTHONPATH=src python scripts/local_scrape_flow.py \
@@ -395,5 +397,6 @@ Start with:
 - `docs/09-engineering-principles.md`
 
 ## TODO
+- Add more sources (currently only Autotempest), Biggest win would be carsales scraping here
 - Move all messages to post in a thread to avoid spam
 - Have different watches on different threads
