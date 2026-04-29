@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "car-watch-bot"
+version = "0.1.0"
+description = "Purpose-built Discord bot for scheduled car listing watch digests."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "APScheduler>=3.10,<4",
+    "beautifulsoup4>=4.12,<5",
+    "discord.py>=2.4,<3",
+    "httpx>=0.27,<1",
+    "pydantic>=2.7,<3",
+    "pydantic-settings>=2.3,<3",
+    "SQLAlchemy>=2.0,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2,<9",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]

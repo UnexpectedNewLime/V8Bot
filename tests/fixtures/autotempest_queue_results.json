@@ -1,0 +1,20 @@
+{
+  "status": 1,
+  "results": [
+    {
+      "title": "2001 Chevrolet Corvette Z06",
+      "url": "https://www.cars.com/vehicledetail/037c4177-c4e1-4f7a-8eb4-628c64347246/",
+      "price": "$25,995",
+      "mileage": "54,222",
+      "location": "Lake Havasu City, AZ",
+      "sourceName": "Cars.com",
+      "sitecode": "cm",
+      "backendSitecode": "cm",
+      "externalId": "037c4177-c4e1-4f7a-8eb4-628c64347246",
+      "vin": "1G1YY12S815106841",
+      "id": "cm-037c4177-c4e1-4f7a-8eb4-628c64347246"
+    }
+  ],
+  "searchAfter": [],
+  "searchAfterMismatch": false
+}
