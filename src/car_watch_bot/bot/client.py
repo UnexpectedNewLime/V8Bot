@@ -117,14 +117,25 @@ class DiscordDigestSender:
     async def send_digest(self, channel_id: str, digest: DigestPayload) -> None:
         """Send one digest payload to a Discord channel."""
 
+        channel = await self._sendable_channel(channel_id)
+        for embed in _build_digest_embeds(digest):
+            await channel.send(embed=embed)
+
+    async def send_no_updates(self, channel_id: str, watch_name: str) -> None:
+        """Send a no-update digest confirmation."""
+
+        channel = await self._sendable_channel(channel_id)
+        await channel.send(f"{watch_name}: scheduled check complete, no new listings.")
+
+    async def _sendable_channel(self, channel_id: str) -> object:
+        """Return a Discord channel that can receive messages."""
+
         channel = self.client.get_channel(int(channel_id))
         if channel is None:
             channel = await self.client.fetch_channel(int(channel_id))
         if not hasattr(channel, "send"):
             raise RuntimeError("configured digest channel cannot receive messages")
-
-        for embed in _build_digest_embeds(digest):
-            await channel.send(embed=embed)
+        return channel
 
 
 def _build_digest_embeds(digest: DigestPayload) -> list[discord.Embed]:

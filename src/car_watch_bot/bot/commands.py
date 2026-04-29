@@ -81,12 +81,21 @@ def register_commands(
                 listings = listing_service.list_watch_listings(
                     str(interaction.user.id),
                     summary.watch_id,
+                    listing_ids=scrape_result.new_listing_ids,
                 )
                 await _send_public_listing_embeds(
                     interaction,
                     summary.watch_id,
                     listings,
-                    heading=f"{summary.car_query}: {len(listings)} pending listings",
+                    heading=f"{summary.car_query}: {len(listings)} new listings",
+                    empty_message=(
+                        f"{summary.car_query}: scrape complete, no new listings."
+                    ),
+                )
+                listing_service.mark_watch_listings_sent(
+                    str(interaction.user.id),
+                    summary.watch_id,
+                    scrape_result.new_listing_ids,
                 )
             return _format_watch_created_with_source(
                 summary,
@@ -113,17 +122,27 @@ def register_commands(
                 str(interaction.user.id),
                 watch_id,
             )
-            listings = listing_service.list_watch_listings(str(interaction.user.id), watch_id)
+            listings = listing_service.list_watch_listings(
+                str(interaction.user.id),
+                watch_id,
+                listing_ids=result.new_listing_ids,
+            )
             await _send_public_listing_embeds(
                 interaction,
                 watch_id,
                 listings,
-                heading=f"Watch {watch_id}: {len(listings)} pending listings",
+                heading=f"Watch {watch_id}: {len(listings)} new listings",
+                empty_message=f"Watch {watch_id}: scrape complete, no new listings.",
+            )
+            listing_service.mark_watch_listings_sent(
+                str(interaction.user.id),
+                watch_id,
+                result.new_listing_ids,
             )
             return "\n".join(
                 [
                     _format_scrape_now_result(result),
-                    f"posted listing messages: {len(listings)}",
+                    f"posted new listing messages: {len(listings)}",
                 ]
             )
 
@@ -373,14 +392,17 @@ async def _send_public_listing_embeds(
     watch_id: int,
     listings: list[DigestListing],
     heading: str,
+    empty_message: str | None = None,
 ) -> None:
     """Send each listing as its own public channel message."""
 
-    if not listings:
-        return
     channel = interaction.channel
     if channel is None or not hasattr(channel, "send"):
         raise RuntimeError("interaction channel cannot receive messages")
+    if not listings:
+        if empty_message:
+            await channel.send(empty_message)
+        return
     for listing in listings:
         await channel.send(
             embed=build_listing_embed(

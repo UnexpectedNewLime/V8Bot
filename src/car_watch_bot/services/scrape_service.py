@@ -91,6 +91,32 @@ class ScrapeService:
                 excluded_keywords=watch.excluded_keywords,
             )
             if not score_result.is_match:
+                existing_listing = self.listing_repository.find_existing_listing(
+                    source_id=source.id,
+                    listing=candidate,
+                )
+                if existing_listing is not None:
+                    converted_price = self._converted_price(
+                        candidate,
+                        watch.preferred_currency,
+                    )
+                    converted_mileage = self._converted_mileage(
+                        candidate,
+                        watch.distance_unit,
+                    )
+                    self.listing_repository.update_listing(
+                        existing_listing,
+                        candidate,
+                        score_result,
+                        converted_price,
+                        watch.preferred_currency,
+                        converted_mileage,
+                        watch.distance_unit,
+                    )
+                    self.listing_repository.exclude_listing_for_watch(
+                        watch,
+                        existing_listing,
+                    )
                 continue
 
             matched_count += 1

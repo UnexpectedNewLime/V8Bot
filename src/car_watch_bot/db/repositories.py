@@ -261,7 +261,15 @@ class ListingRepository:
             select(Listing).where(Listing.source_id == source_id, Listing.url == listing.url)
         )
         if existing_listing is not None:
-            existing_listing.last_seen_at = datetime.utcnow()
+            self._update_listing(
+                existing_listing,
+                listing,
+                score_result,
+                converted_price_amount,
+                converted_price_currency,
+                converted_mileage_value,
+                converted_mileage_unit,
+            )
             self.session.flush()
             return existing_listing, False
 
@@ -289,6 +297,40 @@ class ListingRepository:
         self.session.flush()
         return db_listing, True
 
+    def find_existing_listing(
+        self,
+        source_id: int,
+        listing: ListingCandidate,
+    ) -> Listing | None:
+        """Find a previously stored listing for a candidate."""
+
+        return self.session.scalar(
+            select(Listing).where(Listing.source_id == source_id, Listing.url == listing.url)
+        )
+
+    def update_listing(
+        self,
+        db_listing: Listing,
+        listing: ListingCandidate,
+        score_result: ScoreResult,
+        converted_price_amount: Decimal | None,
+        converted_price_currency: str | None,
+        converted_mileage_value: int | None,
+        converted_mileage_unit: str | None,
+    ) -> None:
+        """Refresh an existing listing from the latest scrape candidate."""
+
+        self._update_listing(
+            db_listing,
+            listing,
+            score_result,
+            converted_price_amount,
+            converted_price_currency,
+            converted_mileage_value,
+            converted_mileage_unit,
+        )
+        self.session.flush()
+
     def add_listing_to_watch(self, watch: Watch, listing: Listing) -> WatchListing:
         """Create a pending watch-listing row if needed."""
 
@@ -299,6 +341,11 @@ class ListingRepository:
             )
         )
         if watch_listing is not None:
+            if watch_listing.status == "excluded":
+                watch_listing.status = "pending_digest"
+                watch_listing.sent_at = None
+                watch_listing.watch_criteria_version = watch.criteria_version
+                self.session.flush()
             return watch_listing
 
         watch_listing = WatchListing(
@@ -309,6 +356,21 @@ class ListingRepository:
         self.session.add(watch_listing)
         self.session.flush()
         return watch_listing
+
+    def exclude_listing_for_watch(self, watch: Watch, listing: Listing) -> None:
+        """Hide an existing pending watch-listing rejected by current criteria."""
+
+        watch_listing = self.session.scalar(
+            select(WatchListing).where(
+                WatchListing.watch_id == watch.id,
+                WatchListing.listing_id == listing.id,
+            )
+        )
+        if watch_listing is None or watch_listing.status != "pending_digest":
+            return
+        watch_listing.status = "excluded"
+        watch_listing.watch_criteria_version = watch.criteria_version
+        self.session.flush()
 
     def list_unnotified_for_watch(self, watch_id: int) -> list[Listing]:
         """List pending listings for a watch."""
@@ -324,6 +386,73 @@ class ListingRepository:
                 .order_by(Listing.id)
             )
         )
+
+    def list_visible_for_watch(self, watch_id: int) -> list[Listing]:
+        """List watch listings that are not excluded by current criteria."""
+
+        return list(
+            self.session.scalars(
+                select(Listing)
+                .join(WatchListing)
+                .where(
+                    WatchListing.watch_id == watch_id,
+                    WatchListing.status.in_(["pending_digest", "sent"]),
+                )
+                .order_by(Listing.id)
+            )
+        )
+
+    def list_unnotified_for_watch_listing_ids(
+        self,
+        watch_id: int,
+        listing_ids: list[int],
+    ) -> list[Listing]:
+        """List selected pending listings for a watch."""
+
+        if not listing_ids:
+            return []
+        return list(
+            self.session.scalars(
+                select(Listing)
+                .join(WatchListing)
+                .where(
+                    WatchListing.watch_id == watch_id,
+                    WatchListing.status == "pending_digest",
+                    Listing.id.in_(listing_ids),
+                )
+                .order_by(Listing.id)
+            )
+        )
+
+    def _update_listing(
+        self,
+        db_listing: Listing,
+        listing: ListingCandidate,
+        score_result: ScoreResult,
+        converted_price_amount: Decimal | None,
+        converted_price_currency: str | None,
+        converted_mileage_value: int | None,
+        converted_mileage_unit: str | None,
+    ) -> None:
+        """Refresh fields that can change between scrape attempts."""
+
+        db_listing.external_id = listing.external_id
+        db_listing.title = listing.title
+        db_listing.description = listing.description
+        db_listing.price_amount = listing.price_amount
+        db_listing.price_currency = listing.price_currency
+        db_listing.converted_price_amount = converted_price_amount
+        db_listing.converted_price_currency = converted_price_currency
+        db_listing.mileage_value = listing.mileage_value
+        db_listing.mileage_unit = listing.mileage_unit
+        db_listing.converted_mileage_value = converted_mileage_value
+        db_listing.converted_mileage_unit = converted_mileage_unit
+        db_listing.location_text = listing.location_text
+        db_listing.score = score_result.score
+        db_listing.score_reasons = score_result.reasons
+        db_listing.content_hash = _content_hash(listing.title, listing.url)
+        db_listing.raw_payload = listing.raw_payload or {}
+        db_listing.last_seen_at = datetime.utcnow()
 
     def mark_listings_as_notified(self, watch_id: int, listing_ids: list[int]) -> None:
         """Mark watch listings as sent."""

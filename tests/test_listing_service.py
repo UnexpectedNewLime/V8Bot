@@ -44,6 +44,27 @@ def test_scrape_watch_now_stores_pending_listings(db_session_factory) -> None:
     assert result.sources_skipped == 0
     assert result.listings_created == 3
     assert result.pending_listings == 3
+    assert result.new_listing_ids == [1, 2, 3]
+
+
+def test_scrape_watch_now_reports_only_new_pending_listing_ids(
+    db_session_factory,
+) -> None:
+    test_scrape_watch_now_stores_pending_listings(db_session_factory)
+
+    result = asyncio.run(_listing_service(db_session_factory).scrape_watch_now("123", 1))
+    new_listings = _listing_service(db_session_factory).list_watch_listings(
+        "123",
+        1,
+        listing_ids=result.new_listing_ids,
+    )
+    all_listings = _listing_service(db_session_factory).list_watch_listings("123", 1)
+
+    assert result.listings_created == 0
+    assert result.pending_listings == 3
+    assert result.new_listing_ids == []
+    assert new_listings == []
+    assert len(all_listings) == 3
 
 
 def test_list_watch_listings_returns_pending_listings(db_session_factory) -> None:
@@ -53,6 +74,16 @@ def test_list_watch_listings_returns_pending_listings(db_session_factory) -> Non
 
     assert len(listings) == 3
     assert all(listing.url for listing in listings)
+
+
+def test_watch_listings_includes_sent_listing_history(db_session_factory) -> None:
+    test_scrape_watch_now_stores_pending_listings(db_session_factory)
+    service = _listing_service(db_session_factory)
+    service.mark_watch_listings_sent("123", 1, [1, 2, 3])
+
+    listings = service.list_watch_listings("123", 1)
+
+    assert len(listings) == 3
 
 
 def test_scrape_watch_now_reports_skipped_sources(db_session_factory) -> None:

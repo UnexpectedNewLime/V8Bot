@@ -45,10 +45,15 @@ class ListingService:
                 raise WatchNotFoundError("watch not found")
 
             sources = SourceRepository(session).list_sources_for_watch(watch.id)
+            listing_repository = ListingRepository(session)
+            before_pending_ids = {
+                listing.id
+                for listing in listing_repository.list_unnotified_for_watch(watch.id)
+            }
             scrape_service = ScrapeService(
                 watch_repository=WatchRepository(session),
                 source_repository=SourceRepository(session),
-                listing_repository=ListingRepository(session),
+                listing_repository=listing_repository,
                 scrape_attempt_repository=ScrapeAttemptRepository(session),
                 scraper_adapters=self.scraper_adapters,
                 usd_to_aud_rate=self.usd_to_aud_rate,
@@ -70,15 +75,21 @@ class ListingService:
                 )
                 scraped_count += 1
 
-            pending_count = len(ListingRepository(session).list_unnotified_for_watch(watch.id))
+            pending_listings = listing_repository.list_unnotified_for_watch(watch.id)
+            new_listing_ids = [
+                listing.id
+                for listing in pending_listings
+                if listing.id not in before_pending_ids
+            ]
             result = ScrapeNowResult(
                 watch_id=watch.id,
                 sources_seen=len(sources),
                 sources_scraped=scraped_count,
                 sources_skipped=skipped_count,
                 listings_created=created_count,
-                pending_listings=pending_count,
+                pending_listings=len(pending_listings),
                 warnings=warnings,
+                new_listing_ids=new_listing_ids,
             )
             session.commit()
             return result
@@ -87,6 +98,7 @@ class ListingService:
         self,
         discord_user_id: str,
         watch_id: int,
+        listing_ids: list[int] | None = None,
     ) -> list[DigestListing]:
         """List unnotified persisted listings for one owned watch."""
 
@@ -95,9 +107,31 @@ class ListingService:
             watch = WatchRepository(session).get_active_for_user(watch_id, user.id)
             if watch is None:
                 raise WatchNotFoundError("watch not found")
-            digest = DigestService(ListingRepository(session)).build_digest(watch)
+            digest_service = DigestService(ListingRepository(session))
+            if listing_ids is None:
+                digest = digest_service.build_listing_history(watch)
+            else:
+                digest = digest_service.build_digest_for_listing_ids(watch, listing_ids)
             if digest is None:
                 return []
             listings = list(digest.listings)
             session.commit()
             return listings
+
+    def mark_watch_listings_sent(
+        self,
+        discord_user_id: str,
+        watch_id: int,
+        listing_ids: list[int],
+    ) -> None:
+        """Mark displayed watch listings as sent."""
+
+        if not listing_ids:
+            return
+        with self.session_factory() as session:
+            user = UserRepository(session).get_or_create_by_discord_id(discord_user_id)
+            watch = WatchRepository(session).get_active_for_user(watch_id, user.id)
+            if watch is None:
+                raise WatchNotFoundError("watch not found")
+            DigestService(ListingRepository(session)).mark_digest_sent(watch.id, listing_ids)
+            session.commit()

@@ -22,6 +22,9 @@ class DigestSender(Protocol):
     async def send_digest(self, channel_id: str, digest: DigestPayload) -> None:
         """Send one digest payload."""
 
+    async def send_no_updates(self, channel_id: str, watch_name: str) -> None:
+        """Send a no-update digest confirmation."""
+
 
 class NotificationService:
     """Business operations for scheduled digest notifications."""
@@ -54,6 +57,12 @@ class NotificationService:
                 digest_service = DigestService(ListingRepository(session))
                 digest = digest_service.build_digest(watch)
                 if digest is None:
+                    await self.digest_sender.send_no_updates(
+                        watch.channel_id,
+                        watch.name,
+                    )
+                    watch.last_digest_sent_at = current_time.astimezone(timezone.utc)
+                    sent_count += 1
                     continue
 
                 await self.digest_sender.send_digest(watch.channel_id, digest)

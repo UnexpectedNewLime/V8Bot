@@ -23,11 +23,17 @@ class FakeDigestSender:
 
     def __init__(self) -> None:
         self.sent_digests: list[tuple[str, DigestPayload]] = []
+        self.no_update_messages: list[tuple[str, str]] = []
 
     async def send_digest(self, channel_id: str, digest: DigestPayload) -> None:
         """Record a sent digest."""
 
         self.sent_digests.append((channel_id, digest))
+
+    async def send_no_updates(self, channel_id: str, watch_name: str) -> None:
+        """Record a no-update message."""
+
+        self.no_update_messages.append((channel_id, watch_name))
 
 
 def _seed_due_watch_with_listings(db_session_factory) -> int:
@@ -88,10 +94,10 @@ def test_digest_is_not_sent_when_watch_time_is_not_due(db_session_factory) -> No
     assert sender.sent_digests == []
 
 
-def test_empty_digest_is_not_sent(db_session_factory) -> None:
+def test_empty_due_digest_sends_no_update_message(db_session_factory) -> None:
     with db_session_factory() as session:
         user = UserRepository(session).get_or_create_by_discord_id("123")
-        WatchRepository(session).create_watch(
+        watch = WatchRepository(session).create_watch(
             user_id=user.id,
             name="Empty digest",
             query="C5 Corvette",
@@ -107,5 +113,12 @@ def test_empty_digest_is_not_sent(db_session_factory) -> None:
 
     sent_count = asyncio.run(service.send_due_digests(now))
 
-    assert sent_count == 0
+    with db_session_factory() as session:
+        db_watch = WatchRepository(session).get_active_for_user(watch.id, user.id)
+        assert db_watch is not None
+        last_sent = db_watch.last_digest_sent_at
+
+    assert sent_count == 1
     assert sender.sent_digests == []
+    assert sender.no_update_messages == [("999", "Empty digest")]
+    assert last_sent is not None
