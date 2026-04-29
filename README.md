@@ -395,5 +395,5 @@ Start with:
 - `docs/09-engineering-principles.md`
 
 ## TODO
--Move all messages to post in a thread to avoid spam
--Have different watches on different threads
+- Move all messages to post in a thread to avoid spam
+- Have different watches on different threads
