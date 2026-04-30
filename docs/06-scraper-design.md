@@ -1,36 +1,53 @@
 # Scraper Design
 
-## MVP Position
+## Current Position
 
-MVP scheduled collection uses mock scraping by default. Real website adapters should be added behind stable scraper boundaries so watch, digest, and deduplication services do not need source-specific changes.
+Scraping is implemented through adapter classes behind the `ScraperAdapter`
+protocol. The bot currently registers:
 
-Current real adapters are `AutoTempestScraper`, `CarsOnLineScraper`,
-`CorvetteMagazineScraper`, and `VetteFindersScraper`. They are implemented for
-manual/local use and fixture-tested parsing, but sources are only scraped when a
-watch is explicitly attached to a matching source kind. They must use polite
-`httpx` requests, configured timeout and user agent values, and no anti-bot
-bypasses.
+- `MockScraper`.
+- `AutoTempestScraper`.
+- `CarsOnLineScraper`.
+- `CorvetteMagazineScraper`.
+- `VetteFindersScraper`.
+
+The adapters are suitable for local/manual use and scheduled use only when a
+watch is attached to a matching source kind. They use polite `httpx` requests,
+configured timeouts, configured user agent, and a per-adapter minimum request
+interval.
+
+There is no browser automation, login flow, or challenge bypass.
+
+## Unsupported Sources
 
 Direct Cars.com, Gateway Classic Cars, and Streetside Classics adapters are not
 registered because simple polite HTTP requests currently receive challenge
-responses. Carsales is also not registered because there is no concrete target
-URL yet.
+responses. Carsales is not registered because there is no concrete target URL
+and permission posture yet.
 
-Custom source tests are allowed in MVP and may make a single diagnostic fetch
-with `httpx`, then inspect the response with BeautifulSoup. That behaviour is a
-source validation tool, not scheduled production scraping. Unsupported domains
-should report that no scheduled adapter is registered, then include lightweight
-diagnostics such as page title, link count, and sampled links from the polite
-fetch.
+Unsupported URLs are classified as `custom_website`. Runtime source addition
+rejects unregistered source kinds. `/watch_source_test` can still run
+`DiagnosticScraper`, which makes a single polite fetch, reports page-level
+warnings, and samples links without enabling scheduled scraping.
 
-Facebook Marketplace is explicitly out of scope for v1 and should be rejected by source validation.
+Facebook Marketplace is explicitly unsupported and should be rejected.
 
-## Scraper Adapter Interface
+## Adapter Interface
 
-Suggested interface:
+Current interface in `scrapers/base.py`:
 
 ```python
-from typing import Protocol
+@dataclass(frozen=True)
+class ScrapeRequest:
+    source_id: int
+    source_name: str
+    source_kind: str
+    base_url: str | None
+    watch_id: int
+    included_keywords: list[str]
+    excluded_keywords: list[str]
+    criteria_version: int
+
 
 class ScraperAdapter(Protocol):
     @property
@@ -41,135 +58,130 @@ class ScraperAdapter(Protocol):
         ...
 ```
 
-Suggested request model:
+Adapters return `ListingCandidate` dataclasses from `core/models.py`.
 
-```python
-class ScrapeRequest(BaseModel):
-    source_id: int
-    source_name: str
-    source_kind: str
-    base_url: str | None
-    source_config: dict
-    watch_id: int
-    included_keywords: list[str]
-    excluded_keywords: list[str]
-    criteria_version: int
-```
+## Listing Candidate Shape
 
-Suggested candidate model:
+Current fields:
 
-```python
-class ListingCandidate(BaseModel):
-    external_id: str | None = None
-    url: str
-    title: str
-    description: str | None = None
-    price_amount: Decimal | None = None
-    price_currency: str | None = None
-    mileage_value: int | None = None
-    mileage_unit: Literal["km", "mi"] | None = None
-    location_text: str | None = None
-    image_url: str | None = None
-    seller_name: str | None = None
-    listed_at: datetime | None = None
-    raw_payload: dict = Field(default_factory=dict)
-```
+- `title`.
+- `url`.
+- `external_id`.
+- `description`.
+- `price_amount`.
+- `price_currency`.
+- `mileage_value`.
+- `mileage_unit`.
+- `location_text`.
+- `source_name`.
+- `listed_at`.
+- `raw_payload`.
+
+URL and title are the practical minimum for useful listing output. Price and
+mileage are optional and produce warnings in source-test results when missing.
 
 ## Mock Scraper
 
-The mock scraper should:
+The mock scraper returns four deterministic C5 Corvette candidates:
 
-- Return deterministic listing candidates.
-- Include at least one duplicate candidate across runs.
-- Include multiple currencies.
-- Include mileage in kilometres and miles.
-- Include listings that match and do not match sample keywords.
-- Include listings with excluded keywords for filter tests.
-- Always include URLs.
+- A strong manual HUD targa match.
+- An automatic convertible candidate intended to be excluded by common tests.
+- A manual coupe missing mileage.
+- A Z06 manual candidate missing price.
 
-Mock data should be small and easy to reason about. Tests should not depend on network access.
+It is used by tests and can be used for local service checks.
 
-## Normalization
+## AutoTempest Adapter
 
-Normalization should produce a consistent listing shape before persistence:
+`AutoTempestScraper` supports:
 
-- Trim whitespace.
-- Normalize URLs where safe.
-- Normalize currency codes to uppercase.
-- Normalize mileage units to `km` or `mi`.
-- Generate a content hash from stable fields.
-- Preserve raw payload for debugging.
+- Static listing-card parsing when exact cards are present.
+- Queue-results JSON fetching when page metadata exposes supported source codes.
+- Optional comparison link capture for manual debugging.
+- Filtering out Facebook Marketplace comparison/queue content.
+- Adapter-specific source-test warnings and errors.
 
-## Deduplication Strategy
+By default, static comparison links are not returned as listings because they are
+not exact vehicle listing URLs.
 
-Deduplication should happen before creating watch delivery rows.
+## Static HTML Adapters
 
-Priority:
+The shared `StaticHtmlScraper` base provides:
 
-1. Same source and same external id.
-2. Same source and canonical URL.
-3. Same source and content hash.
+- Polite HTML fetching.
+- Minimum interval handling.
+- Source-test result building.
+- Common price and mileage extraction helpers.
+- Raw payload warning helpers.
 
-Per-watch delivery dedupe:
+Current subclasses:
 
-- Use a unique `(watch_id, listing_id)` relationship.
-- If a listing has already been sent for a watch, do not send it again.
-- If a listing is rediscovered before digest time, update `last_seen_at` but keep one pending watch listing.
+- `CarsOnLineScraper`: parses `li.job_listing` cards.
+- `CorvetteMagazineScraper`: parses schema.org car classified cards.
+- `VetteFindersScraper`: parses C5 summary rows.
 
-## Keyword Filtering
+## Diagnostic Scraper
 
-Filtering should be case-insensitive.
+`DiagnosticScraper` is for source testing unsupported domains. It:
 
-Match if:
+- Reports that the domain is not supported for scheduled scraping.
+- Fetches one page politely.
+- Captures page title and link count.
+- Samples up to five visible links as rough candidates.
+- Builds a `SourceTestResult` with `url_accepted=False`.
 
-- At least one included keyword appears in title or description.
-- No excluded keyword appears in title or description.
+Diagnostic output must never be treated as production scraping.
 
-Future versions may support structured filters such as price range, year range, make, model, transmission, and location radius.
+## Scoring And Filtering
 
-## Source Test Behaviour
+Scrapers do not decide watch matches. `ScrapeService` passes candidates to
+`score_listing`, which:
 
-Source test exists to help users validate custom website sources before future real scraping support.
+- Searches title and description.
+- Rejects listings containing excluded keywords.
+- Adds score for car query terms.
+- Adds score for included keywords.
+- Notes missing price or mileage.
 
-MVP behaviour:
+Non-matching rediscovered listings can refresh the stored row and mark an
+existing pending watch listing `excluded`.
 
-- Reject unsupported domains, including Facebook Marketplace.
-- Validate URL shape.
-- Optionally fetch the page with `httpx`.
-- Parse HTML with BeautifulSoup.
-- Check whether the page has listing-like anchors, title text, and accessible content.
-- Return a structured result with `status`, `notes`, and optional `detected_links`.
-- Record a `SourceTestAttempt`.
-- Do not persist listings.
-- Do not create a real scraper adapter.
-- Do not mark the source as production-scrapable.
+## Persistence And Dedupe
 
-Suggested statuses:
+Scrapers do not write to the database. `ScrapeService` and `ListingRepository`
+handle persistence.
 
-- `passed`: page is reachable and appears to contain listing-like links.
-- `warning`: page is reachable but structure is unclear.
-- `failed`: URL is invalid, blocked, unreachable, unsupported, or forbidden by v1 policy.
+Current repository behavior:
 
-## Scrape Attempt Behaviour
+- Finds existing listings by `(source_id, url)`.
+- Stores `external_id`, with a database uniqueness constraint on
+  `(source_id, external_id)`.
+- Stores a content hash from title and URL.
+- Uses unique `(watch_id, listing_id)` to prevent duplicate watch deliveries.
+- Refreshes existing listing fields on rediscovery.
 
-Each scheduled adapter call should create a `ScrapeAttempt` record.
+## Source Test Behavior
 
-Rules:
+Source tests:
 
-- Mark successful adapter calls as `success`, including counts for seen, matched, and created listings.
-- Mark adapter exceptions, timeouts, and parser failures as `failed`.
-- Keep failed attempts silent for normal users in MVP.
-- Do not send partial or failed scrape information in digests.
-- If the scheduler encounters a source kind with no registered adapter, skip it before calling the scraper. Recording a `skipped` attempt is optional, but the scheduler must never treat a custom website source as mock data.
+- Validate `http` or `https` URL shape.
+- Reject Facebook domains.
+- Use a registered adapter for known source kinds.
+- Use diagnostics for unsupported domains when called from `/watch_source_test`.
+- Store `SourceTestAttempt` rows.
+- Never create `Listing` or `WatchListing` rows.
 
-## Future Real Scraper Rules
+Accepted source tests may still include warnings for missing price or mileage.
 
-When real scraping is added:
+## Future Adapter Rules
 
-- Review source terms and robots policies.
-- Prefer simple `httpx` + BeautifulSoup adapters where permitted.
-- Add per-source rate limits.
-- Add timeouts and retries with backoff.
-- Identify stable listing ids when possible.
-- Keep parser tests based on saved HTML fixtures.
-- Keep source-specific parsing isolated to adapter modules.
+When adding a source:
+
+- Confirm polite static access is viable.
+- Respect site terms and robots policy.
+- Use fixture-based parser tests.
+- Add the adapter under `scrapers/`.
+- Register it in `main._scraper_adapters`.
+- Add source-kind inference in `SourceService`.
+- Add tests for classification, parser output, source-test results, and runtime
+  registration.

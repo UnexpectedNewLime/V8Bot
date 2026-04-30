@@ -1,168 +1,140 @@
 # Testing Plan
 
-## Goals
+## Current Test Posture
 
-Testing should prove that V8Bot can manage watches and sources, collect mock listings silently, dedupe matches, and send scheduled digests without implementing real website scraping.
+The repository uses pytest. Tests are local, deterministic, and do not require
+Discord credentials or live website requests. Database tests use in-memory
+SQLite. Scraper tests use saved fixtures or mocked `httpx` transports.
 
-Use pytest as the primary test runner.
+Primary checks:
 
-## Test Layers
+```bash
+pytest
+python -m compileall src tests scripts
+```
 
-### Unit Tests
+For documentation-only changes, use filesystem checks and `git status --short`.
 
-Cover pure and mostly pure logic:
+## Existing Coverage Areas
 
-- Keyword normalization.
-- Included and excluded keyword filtering.
-- Currency conversion.
-- Mileage conversion.
-- Listing normalization.
-- Content hash generation.
-- Deduplication decisions.
-- Digest payload formatting.
-- Timezone and notification-time calculations.
-- Facebook Marketplace rejection.
-- Criteria version changes after watch search edits or source enablement changes.
+### Configuration And Startup
 
-### Repository Tests
+- Bot client command registration.
+- Runtime scraper adapter registration.
+- Scheduler job registration.
+- Database initialization and the `thread_id` compatibility column.
 
-Use temporary SQLite databases to test:
+### Watch Service
 
-- User upsert by Discord id.
-- Watch create, update, list, and deactivate.
-- Source create, list, and deactivate.
-- Watch-source enable and disable.
-- Listing upsert by external id.
-- Listing upsert by URL.
-- Watch listing uniqueness.
-- Digest batch persistence.
-- Scrape attempt persistence.
+- Keyword CSV parsing.
+- Notification time validation.
+- Watch creation with defaults.
+- Delivery target and thread id persistence.
+- Watch listing by user.
+- Ownership checks on deactivation.
+
+### Source Service
+
+- Source URL validation.
+- Source tests that pass, warn, or fail.
 - Source test attempt persistence.
+- Add-source source tests.
+- Domain-derived source names.
+- Generated source name uniqueness.
+- Existing source reuse for the same URL.
+- Duplicate name rejection for a different URL.
+- Known source-kind inference for AutoTempest, Cars On Line, Corvette Magazine,
+  and VetteFinders.
+- Diagnostic source tests for unsupported domains.
+- Runtime rejection of unregistered source kinds when disabled.
+- Source removal from a watch.
 
-### Service Tests
+### Scrape And Listing Services
 
-Test core service behaviour with fake repositories where useful and SQLite repositories where transaction behaviour matters:
+- Mock scraper candidate shape.
+- Matching and exclusion behavior.
+- Repeated scrape dedupe.
+- Listing refresh on rediscovery.
+- Excluded keyword changes marking pending rows `excluded`.
+- Immediate scrape summary counts.
+- New pending listing id tracking.
+- Skipped source warnings when no adapter is registered.
+- Listing history including sent rows.
 
-- Creating a valid watch.
-- Rejecting invalid watch inputs.
-- Editing only provided fields.
-- Adding a custom source.
-- Rejecting unsupported source URLs.
-- Running a source test without creating listings.
-- Recording source test attempts.
-- Running mock scrape collection without sending Discord messages.
-- Recording failed scrape attempts without notifying users.
-- Matching listings to watches.
-- Keeping duplicate listings out of pending digest rows.
-- Excluding or revalidating pending matches from old watch criteria versions.
-- Selecting due digests.
-- Marking listings sent only after successful delivery.
+### Digest And Notification
 
-### Scheduler Tests
+- Digest payload construction.
+- Empty digest behavior.
+- Marking listings sent.
+- Source name display from raw payload and known domains.
+- Whole-number price formatting with commas.
+- Listing history payloads.
+- Due digest detection by local watch time.
+- No duplicate scheduled sends in the same local minute.
+- No-update messages for empty due digests.
+- Persisting resolved thread ids.
 
-Use fake services and controlled clocks:
+### Discord Presentation
 
-- Scrape job calls scrape service on the configured interval.
-- Digest job checks due watches.
-- Failed job calls are logged and do not crash the scheduler.
+- Registered slash command names.
+- Ephemeral message splitting.
+- Multi-URL parsing from command fields.
+- Markdown link URL extraction.
+- Source-name validation for multi-URL input.
+- Compact source-add summaries.
+- Listing embed field shape.
+- Per-watch thread names, reuse, unarchiving, and replacement after deletion.
 
-### Discord Command Tests
+### Scraper Adapters
 
-Prefer testing command handlers through service boundaries and presenters:
-
-- Slash command options map to service requests.
-- Long operations defer responses.
-- Configuration commands return ephemeral responses.
-- Watch list and source list presenters fit Discord limits.
-- Digest presenter splits messages when necessary.
-
-Full Discord API tests should be manual for MVP unless a dedicated test harness is added.
-
-## Fixtures
-
-Recommended fixtures:
-
-- Temporary SQLite database.
-- SQLAlchemy session factory.
-- Fake clock.
-- Mock scraper adapter.
-- Example users.
-- Example watches.
-- Example sources.
-- Example listing candidates.
-- Currency rate provider with fixed rates.
-
-## Mock Scraper Test Cases
-
-The deterministic mock scraper should support tests for:
-
-- New listing discovery.
-- Duplicate listing rediscovery.
-- Multiple currencies.
-- Kilometre and mile mileage values.
-- Excluded keyword filtering.
-- Listings with missing optional fields.
-- Required URL presence.
-
-## Source Test Cases
-
-Source test should cover:
-
-- Valid custom URL with listing-like HTML.
-- Valid custom URL with no listing-like content.
-- Invalid URL.
-- Unreachable URL through mocked `httpx`.
-- Timeout through mocked `httpx`.
-- Facebook Marketplace URL rejected.
-- Source test does not create listing records.
-- Source test records an attempt and updates latest source test status.
-
-## Digest Test Cases
-
-Digest tests should cover:
-
-- No pending listings.
-- One pending listing.
-- Multiple pending listings.
-- Listings already sent are excluded.
-- Digest failure leaves listings pending.
-- Successful digest marks listings sent.
-- Pending listings from stale watch criteria are not accidentally sent after a material watch edit.
-- Price display uses preferred currency.
-- Mileage display defaults to kilometres.
-- Each digest listing includes a link.
-
-## Integration Tests
-
-MVP integration tests should run locally without network access:
-
-- Initialize database.
-- Create user, source, and watch.
-- Run mock scrape collection.
-- Confirm pending watch listings.
-- Confirm scrape attempt record.
-- Run digest service with a fake Discord sender.
-- Confirm sent state and digest batch record.
-
-## Manual QA Checklist
-
-Before considering MVP complete:
-
-- Bot starts locally with configured Discord token.
-- Slash commands sync in a test guild.
-- `/watch add` creates a watch.
-- `/watch list` shows the watch.
-- `/watch edit` changes notification time and currency.
-- `/source add` rejects Facebook Marketplace.
-- `/source test` returns a structured result.
-- Mock scrape stores listings without posting to Discord.
-- Digest posts at the configured time.
-- Duplicate listings are not resent.
-- Every digest listing contains a link.
+- AutoTempest listing-card parsing.
+- AutoTempest comparison-link handling.
+- AutoTempest queue-results parsing.
+- Guarding against treating search URLs as exact listings.
+- HTTP error handling.
+- Cars On Line fixture parsing.
+- VetteFinders fixture parsing.
+- Corvette Magazine fixture parsing.
+- Static adapter mocked transport behavior.
+- Diagnostic scraper warnings and sampled links.
 
 ## Test Data Safety
 
-- Tests should not require real Discord credentials.
-- Tests should not make live website requests by default.
-- Tests should not depend on real exchange rates.
-- Tests should clean up temporary SQLite files.
+- Do not read real `.env` secrets in assertions or output.
+- Do not require Discord API access in automated tests.
+- Do not make live HTTP calls in automated tests.
+- Use fake clocks or explicit datetimes for notification tests.
+- Use fixed conversion rates in tests.
+- Keep parser fixtures under `tests/fixtures/`.
+
+## Expectations For New Work
+
+Add focused tests when changing:
+
+- Command names, options, response formatting, or Discord routing.
+- Watch/source validation rules.
+- Source-kind inference.
+- Scraper parsing.
+- Scheduled job intervals.
+- Database schema or repository behavior.
+- Listing dedupe, scoring, exclusion, or sent-state logic.
+- Currency or mileage conversion.
+
+Prefer the smallest test that proves the behavior. Use service-level tests over
+Discord API integration tests whenever possible.
+
+## Manual QA
+
+Manual Discord QA is still useful before treating runtime changes as production
+ready:
+
+- Bot starts with a valid token.
+- Guild slash commands sync.
+- `/watch_add` creates a watch and, with source URLs, can run the initial scrape.
+- Watch-specific threads are created and reused.
+- `/watch_source_add` accepts known supported source URLs.
+- `/watch_source_test` returns diagnostics for unsupported URLs.
+- `/watch_scrape_now` posts only new listing embeds.
+- Scheduled digest posts pending listings at the configured local time.
+- Empty due digests post a no-update message.
+- Duplicate listings are not resent by scheduled digests.

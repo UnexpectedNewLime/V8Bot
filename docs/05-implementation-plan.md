@@ -1,164 +1,130 @@
 # Implementation Plan
 
-## Milestone 1: Project Skeleton
+## Current Implementation Status
 
-Goals:
+The repository has passed the original skeleton phase. The current codebase
+contains:
 
-- Establish Python 3.11+ package layout.
-- Add dependency management.
-- Add linting and formatting decisions.
-- Add settings model.
-- Add bot entrypoint.
+- Python package, configuration, logging, and bot entrypoint.
+- SQLAlchemy models and repositories.
+- Watch, source, listing, scrape, digest, and notification services.
+- Deterministic mock scraper.
+- Registered real adapters for AutoTempest, Cars On Line, Corvette Magazine, and
+  VetteFinders.
+- Diagnostic scraper for unsupported source tests.
+- Flat Discord slash command surface.
+- Per-watch Discord thread routing.
+- APScheduler scrape and digest jobs.
+- Local scripts for service-layer and adapter-level checks.
+- Unit and integration-style tests with in-memory SQLite and saved HTML
+  fixtures.
+- Podman-first container setup with Docker override support.
 
-Deliverables:
+## Completed Milestones
 
-- `v8bot/` package.
-- `tests/` package.
-- Basic config loading.
-- Minimal startup path that can run without connecting to Discord in tests.
+### Project Skeleton
 
-## Milestone 2: Database and Repositories
+Completed:
 
-Goals:
+- `car_watch_bot` package under `src/`.
+- `pyproject.toml` and `requirements.txt`.
+- Pydantic settings in `config.py`.
+- Runtime entrypoint in `main.py`.
 
-- Define SQLAlchemy models.
-- Configure SQLite engine and sessions.
-- Implement repositories for users, watches, sources, watch-source links, listings, watch listings, digest batches, scrape attempts, and source test attempts.
+### Database And Repositories
 
-Deliverables:
+Completed:
 
-- Database initialization.
-- Repository tests using temporary SQLite databases.
-- Seed or startup creation for built-in mock source.
-- Persistence for failed scrape attempts and source test attempts.
+- SQLAlchemy table models for users, watches, sources, watch-source links,
+  listings, watch listings, scrape attempts, and source test attempts.
+- Repository layer in `db/repositories.py`.
+- In-memory SQLite tests.
+- Compatibility helper for adding `watches.thread_id` to old local databases.
 
-## Milestone 3: Core Watch and Source Services
+Not implemented:
 
-Goals:
+- General migration framework.
+- Digest batch persistence.
 
-- Implement watch create/list/show/edit/deactivate flows.
-- Implement source add/list/test/deactivate flows.
-- Enforce MVP source restrictions, including no Facebook Marketplace in v1.
-- Keep user-owned source tests separate from scheduled production scraping.
+### Core Services
 
-Deliverables:
+Completed:
 
-- Pydantic request and response models.
-- Unit tests for validation and ownership rules.
-- Source test service returning structured results.
-- Criteria version updates when watch matching rules or enabled source set changes.
+- Watch create/list/deactivate and preference updates.
+- Keyword and exclusion updates.
+- Source add/list/remove/test flows.
+- Source name generation and reuse.
+- Manual scrape-now flow.
+- Digest payload formatting and sent-state updates.
+- Scheduled notification service.
 
-## Milestone 4: Mock Scraping and Deduplication
+### Scraping
 
-Goals:
+Completed:
 
-- Define scraper adapter interface.
-- Implement deterministic mock scraper.
-- Normalize listing candidates.
-- Match listings against watch keywords.
-- Deduplicate listings globally and per watch.
-- Record scrape attempt status for successes, failures, and skipped non-adapter sources when applicable.
+- `ScraperAdapter` protocol.
+- Mock scraper.
+- AutoTempest static/queue result parsing.
+- Cars On Line static card parsing.
+- Corvette Magazine classified card parsing.
+- VetteFinders summary row parsing.
+- Unsupported-domain diagnostics.
+- Saved fixture parser tests.
 
-Deliverables:
+Still limited:
 
-- `ScraperAdapter` protocol or abstract base class.
-- `MockScraperAdapter`.
-- Dedupe service.
-- Tests for keyword filtering, exclusions, URL dedupe, external id dedupe, and content hash dedupe.
-- Tests that failed scraper calls create `ScrapeAttempt` records without notifying users.
+- Adapters intentionally use polite static HTTP only.
+- Challenge-heavy direct marketplace sites are not registered.
+- Carsales is pending a concrete URL and policy decision.
 
-## Milestone 5: Currency and Unit Display
+### Discord Commands
 
-Goals:
+Completed:
 
-- Convert listing prices to the watch's preferred currency.
-- Convert mileage to the watch's distance unit.
-- Default mileage display to kilometres.
+- Watch creation, listing, removal, keyword edits, preference updates.
+- Source add/list/remove/test.
+- Manual scrape and listing posting.
+- Ephemeral command summaries.
+- Public per-watch listing threads.
 
-Deliverables:
+Current command structure is flat underscore commands, not nested groups.
 
-- Currency service with MVP static rates or injectable provider.
-- Unit conversion service.
-- Tests for price and mileage display.
+### Scheduler
 
-## Milestone 6: Digest Service
+Completed:
 
-Goals:
+- `collect_listings` interval job.
+- `send_due_digests` one-minute interval job.
+- Scheduler lifecycle tied to the Discord client setup/close path.
 
-- Select pending listings for each due watch.
-- Build digest payloads.
-- Mark deliveries as sent after successful Discord send.
-- Preserve pending status after failed sends.
+Known mismatch:
 
-Deliverables:
+- `DIGEST_POLL_INTERVAL_MINUTES` exists in settings, but `create_scheduler`
+  currently schedules digest checks every minute.
 
-- Digest payload models.
-- Digest service tests.
-- Empty digest handling policy.
+## Recommended Next Work
 
-## Milestone 7: Scheduler
+1. Decide whether digest batches are still needed. If yes, add the table,
+   repository methods, service integration, and tests. If no, keep docs and
+   product language centered on `watch_listings` and `last_digest_sent_at`.
+2. Add a migration approach before making more schema changes.
+3. Reconcile `/watch_listings` naming/description with its current behavior of
+   showing visible listing history, not only pending listings.
+4. Decide whether `DIGEST_POLL_INTERVAL_MINUTES` should control the scheduler or
+   be removed from config.
+5. Expand currency conversion beyond USD to AUD only if product scope requires
+   it.
+6. Add a source adapter only when polite HTTP access and parser fixtures are
+   available.
+7. Clean up legacy README notes that are outside `docs/` when making a README
+   pass.
 
-Goals:
+## Definition Of Done For New Changes
 
-- Configure APScheduler.
-- Add periodic scrape job.
-- Add digest due-check job.
-
-Deliverables:
-
-- Scheduler setup module.
-- Job functions that call core services.
-- Tests with a fake clock where practical.
-
-## Milestone 8: Discord Slash Commands
-
-Goals:
-
-- Register watch and source commands.
-- Use ephemeral responses for configuration.
-- Render scheduled digest messages.
-
-Deliverables:
-
-- Command modules under `v8bot/bot/commands/`.
-- Presenter helpers.
-- Interaction tests or service-level command handler tests where feasible.
-
-## Milestone 9: End-to-End MVP Hardening
-
-Goals:
-
-- Run bot locally against a test Discord server.
-- Verify watch creation, mock scrape collection, and scheduled digest delivery.
-- Confirm no immediate listing alerts occur.
-- Confirm custom source tests do not create listings.
-
-Deliverables:
-
-- Manual QA checklist.
-- Updated README with setup and run instructions.
-- Known limitations documented.
-
-## Implementation Order
-
-Recommended order:
-
-1. Skeleton and settings.
-2. Database models and repositories.
-3. Pydantic DTOs and core services.
-4. Mock scraper and dedupe.
-5. Digest service.
-6. Scheduler.
-7. Discord command layer.
-8. Testing and documentation updates.
-
-## Definition of Done for MVP
-
-- Tests pass with pytest.
-- Bot can start with a local SQLite database.
-- User can manage watches and sources through slash commands.
-- Mock scraper stores matching listings silently.
-- Digest sends only at the configured notification time.
-- Listings are deduped per watch.
-- Digest listings include links.
-- Facebook Marketplace is blocked in v1.
+- Existing tests pass with `pytest`.
+- For code changes, `python -m compileall src tests scripts` passes.
+- New behavior has focused tests.
+- Docs and README stay aligned when commands, config, schema, or supported
+  source kinds change.
+- No secrets, local `.codex/` context, SQLite files, or runtime Docker overrides
+  are committed.
