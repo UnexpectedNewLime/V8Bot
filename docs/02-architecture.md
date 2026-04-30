@@ -2,181 +2,197 @@
 
 ## Overview
 
-V8Bot should be built as a standalone Discord bot with modular core services. Discord-specific command handlers should be thin adapters over reusable application services so a future website can reuse watch management, source management, scraping orchestration, deduplication, price conversion, and digest generation.
+V8Bot is a standalone Discord bot with a layered Python package named
+`car_watch_bot`. Discord command handlers are thin adapters over services.
+Services coordinate repositories, scraper adapters, conversion helpers, digest
+formatting, and notification senders.
+
+The design still keeps the core reusable outside Discord: services do not accept
+Discord interaction objects, scrapers do not know about Discord or the database,
+and repositories own SQLAlchemy access.
 
 ## Technology Stack
 
-- Python 3.11+
-- `discord.py` for bot runtime and slash commands
-- SQLAlchemy for ORM and database access
-- SQLite for MVP persistence
-- APScheduler for scrape and digest schedules
-- Pydantic for settings and boundary models
-- `httpx` and BeautifulSoup for MVP source testing and future scraper implementations
-- pytest for automated tests
+- Python 3.11+.
+- `discord.py` for bot runtime and slash commands.
+- SQLAlchemy with SQLite for persistence.
+- APScheduler for scrape and digest intervals.
+- Pydantic Settings for environment configuration.
+- `httpx` and BeautifulSoup for polite static HTML source adapters and
+  diagnostics.
+- pytest for automated tests.
 
-## Proposed Folder Structure
+## Actual Folder Structure
 
 ```text
-v8bot/
-  __init__.py
+src/car_watch_bot/
   main.py
   config.py
-  logging.py
+  logging_config.py
 
   bot/
-    __init__.py
     client.py
-    commands/
-      __init__.py
-      watches.py
-      sources.py
-      admin.py
-    presenters/
-      __init__.py
-      digest_presenter.py
-      command_presenter.py
+    commands.py
+    embeds.py
+    watch_threads.py
+    threads.py
 
   core/
-    __init__.py
+    conversions.py
+    digest.py
     models.py
-    errors.py
-    services/
-      __init__.py
-      watch_service.py
-      source_service.py
-      scrape_service.py
-      digest_service.py
-      currency_service.py
-      unit_service.py
-      dedupe_service.py
-      source_test_service.py
+    scoring.py
 
   db/
-    __init__.py
-    engine.py
-    session.py
+    database.py
     models.py
-    repositories/
-      __init__.py
-      watches.py
-      sources.py
-      listings.py
-      deliveries.py
-      scrape_attempts.py
-      source_test_attempts.py
+    repositories.py
 
   scrapers/
-    __init__.py
     base.py
     mock.py
-    source_tester.py
-    normalization.py
+    static_html.py
+    diagnostic.py
+    autotempest.py
+    cars_on_line.py
+    corvette_magazine.py
+    vettefinders.py
 
   scheduler/
-    __init__.py
     jobs.py
-    setup.py
+
+scripts/
+  local_scrape_flow.py
+  local_watch_flow_check.py
+  manual_autotempest_scrape.py
 
 tests/
-  unit/
-  integration/
-  fixtures/
-
-docs/
 ```
 
-## Layering
+## Dependency Direction
 
-### Discord Layer
+The intended dependency direction is:
+
+```text
+bot -> services -> repositories -> database
+                  -> scrapers
+                  -> core helpers
+scheduler -> services
+```
+
+Rules:
+
+- `bot/` registers slash commands, defers interactions, formats responses, and
+  sends Discord embeds.
+- `services/` owns business workflows and transaction boundaries.
+- `db/repositories.py` owns persistence operations.
+- `scrapers/` extracts listing candidates only.
+- `core/` contains interface-neutral dataclasses and pure helpers.
+- `scheduler/` triggers services.
+
+## Runtime Assembly
+
+`car_watch_bot.main` loads settings, initializes the SQLite schema, builds a
+session factory, creates scraper adapters, constructs services, creates the
+Discord client, wires the notification sender, and starts APScheduler during the
+Discord setup hook.
+
+Runtime scraper adapters are currently registered for:
+
+- `mock`.
+- `autotempest`.
+- `cars_on_line`.
+- `corvette_magazine`.
+- `vettefinders`.
+
+`SourceService` is configured at runtime with `allow_unregistered_sources=False`.
+That means unsupported domains can be tested diagnostically with
+`/watch_source_test`, but they cannot be attached to watches for scheduled
+scraping.
+
+## Discord Layer
 
 The Discord layer owns:
 
-- Bot startup and login.
+- Bot startup and command tree sync.
 - Slash command registration.
-- Interaction deferral and response formatting.
-- Discord channel/user/guild identifiers.
-- Embed or message presentation.
+- Interaction deferral and ephemeral responses for configuration commands.
+- Listing embed construction.
+- Per-watch thread resolution, creation, unarchiving, and reuse.
+- Digest sending through `DiscordDigestSender`.
 
-It should not own scraping, database rules, deduplication, currency conversion, or digest business logic.
+The current command names are flat underscore commands, not nested command
+groups. See `docs/04-command-design.md`.
 
-### Application/Core Layer
+## Service Layer
 
-The core layer owns:
+Current services:
 
-- Watch lifecycle.
-- Source lifecycle.
-- Scrape orchestration.
-- Listing filtering and deduplication.
-- Digest selection and delivery state changes.
-- Currency and unit normalization rules.
+- `WatchService`: creates, lists, updates, deactivates, and resolves delivery
+  targets for watches.
+- `SourceService`: validates URLs, infers source kinds, runs source tests,
+  creates/reuses sources, and attaches/removes them from watches.
+- `ListingService`: runs user-triggered scrapes, lists visible watch listings,
+  and marks posted listings sent.
+- `ScrapeService`: runs scheduled or explicit scrape orchestration for active
+  watch-source pairs.
+- `DigestService`: builds digest/listing payloads from stored rows and marks
+  rows sent.
+- `NotificationService`: sends due scheduled digests or no-update confirmations.
 
-Core services should receive dependencies explicitly, such as repositories, scraper registry, currency converter, and clock.
+## Scraper Layer
 
-### Persistence Layer
+All production source adapters implement the `ScraperAdapter` protocol in
+`scrapers/base.py`:
 
-The persistence layer owns SQLAlchemy models, sessions, repositories, and database transaction boundaries. Repositories should expose intention-revealing methods rather than leaking query details into command handlers.
+- `source_kind` identifies the adapter.
+- `fetch_listings(ScrapeRequest)` returns `ListingCandidate` rows.
 
-### Scraper Layer
+Adapters use configured user agent, timeout, and minimum request interval. Tests
+use saved fixtures or mocked `httpx` transports.
 
-The scraper layer owns source adapters. MVP implementation should include only mock scraping and a source test utility for validating custom website inputs. Real scraping should be added later behind the same adapter interface.
+## Persistence Layer
 
-MVP source tests may use `httpx` and BeautifulSoup to inspect a submitted custom website URL, but this is not the same as production scraping. Source tests return diagnostics and optional detected links; they do not create listings, schedule collection, or register a custom scraper adapter.
+`init_database` creates tables with SQLAlchemy metadata. There is no migration
+framework. The only compatibility shim currently adds `watches.thread_id` to
+older local SQLite databases if missing.
 
-### Scheduler Layer
+Repositories are grouped in one module:
 
-The scheduler layer owns recurring jobs:
+- `UserRepository`.
+- `WatchRepository`.
+- `SourceRepository`.
+- `ListingRepository`.
+- `ScrapeAttemptRepository`.
+- `SourceTestAttemptRepository`.
 
-- Periodic scrape collection.
-- Digest delivery checks.
-- Optional cleanup jobs for stale records.
+## Scheduler Flow
 
-Jobs should call core services rather than performing business logic directly.
+APScheduler registers two jobs:
 
-## Runtime Flow
+- `collect_listings`, every `SCRAPE_INTERVAL_MINUTES`.
+- `send_due_digests`, every minute.
 
-1. Bot starts and loads settings.
-2. Database engine and sessions are configured.
-3. Core services and scraper registry are assembled.
-4. Discord commands are registered.
-5. APScheduler starts periodic scrape and digest jobs.
-6. Scrape jobs select active watches and enabled sources that have a registered adapter.
-7. Scrape jobs record attempt status, store matching listings silently, and leave failures available for diagnostics.
-8. Digest jobs send due watch digests and mark deliveries as sent.
-
-## Multi-User and Ownership Rules
-
-- Every watch belongs to exactly one user.
-- A user can own many watches.
-- A watch can have many enabled sources through `WatchSource`.
-- Built-in sources are globally available.
-- User-owned custom sources are visible to their owner and can be attached to that owner's watches.
-- Commands must scope watch and source selectors by the interacting Discord user unless an admin command explicitly opts into a broader scope.
-- Digest delivery uses the watch's stored Discord guild and channel ids, not the current command interaction.
+The digest poll interval setting exists in config, but the current scheduler job
+uses a fixed one-minute interval.
 
 ## Configuration
 
-Use a Pydantic settings model for:
+Settings come from environment variables or `.env`:
 
-- Discord bot token.
-- SQLite database URL.
-- Default timezone.
-- Default currency.
-- Default distance unit.
-- Scrape interval.
-- Digest polling interval.
-- Mock scraper settings.
-- Logging level.
+- `DISCORD_BOT_TOKEN`.
+- `DISCORD_GUILD_ID`.
+- `DATABASE_URL`.
+- `DEFAULT_TIMEZONE`.
+- `DEFAULT_CURRENCY`.
+- `DEFAULT_DISTANCE_UNIT`.
+- `USD_TO_AUD_RATE`.
+- `SCRAPE_INTERVAL_MINUTES`.
+- `DIGEST_POLL_INTERVAL_MINUTES`.
+- `SCRAPER_USER_AGENT`.
+- `SCRAPER_TIMEOUT_SECONDS`.
+- `SCRAPER_MIN_INTERVAL_SECONDS`.
+- `LOG_LEVEL`.
 
-Secrets should come from environment variables or a local ignored `.env` file.
-
-## Future Website Reuse
-
-To keep services reusable later:
-
-- Keep Discord IDs as fields on watch delivery settings, not as global assumptions.
-- Avoid passing Discord interaction objects into core services.
-- Return Pydantic DTOs or domain objects from services.
-- Keep presentation formatting outside core services.
-- Keep authentication and user ownership concepts explicit in the data model.
-- Keep source, watch, and digest services callable without Discord imports.
+Container deployment overrides `DATABASE_URL` to
+`sqlite:////data/car_watch_bot.sqlite3`.

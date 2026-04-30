@@ -2,91 +2,116 @@
 
 ## Purpose
 
-V8Bot is a standalone Discord bot for watching car listings and delivering scheduled digests. Users define searches with included keywords, excluded keywords, preferred currency, distance unit, sources, and notification time. The bot checks configured sources during the day, stores matching listings silently, deduplicates them, and sends new results only in the user's scheduled Discord digest.
+V8Bot is a purpose-built Discord bot for watching car listings. Users create a
+watch with a car query, included keywords, excluded keywords, preferred currency,
+distance unit, source URLs, and a notification time. The bot stores matching
+listings, deduplicates them per source and watch, and posts listing embeds to a
+watch-specific Discord thread.
 
 ## Target Users
 
-- Car buyers who repeatedly check multiple listing sites.
-- Discord server members who want listing alerts in a predictable daily digest.
-- Power users who want custom website sources tested before being added to a watch.
+- Discord server members repeatedly checking car listings.
+- Car buyers who want a predictable watch thread instead of scattered manual
+  links.
+- Power users who want to test known source URLs before attaching them to a
+  watch.
 
-## MVP Scope
+## Current Scope
 
-- Standalone Discord bot built with Python 3.11+ and `discord.py`.
-- Slash commands for creating, viewing, modifying, and removing watches.
-- Slash commands for adding, viewing, testing, and removing sources.
+- Standalone Python 3.11+ Discord bot using `discord.py`.
 - SQLite persistence through SQLAlchemy.
-- APScheduler jobs for periodic source checks and scheduled digests.
-- Pydantic models for configuration, parsed listing payloads, and service boundaries.
-- Mock scraper adapter that returns deterministic sample listings.
-- Scraper adapter interface designed for future real website adapters.
-- Listing deduplication by source, external listing id when available, URL, and normalized listing fingerprint.
-- Silent listing collection during the day.
-- Scheduled digests only; no immediate listing alerts in MVP.
-- Price conversion to each watch's preferred currency.
-- Mileage display defaults to kilometres.
-- Every listing shown in a digest includes a link.
+- APScheduler jobs for periodic scrape collection and due digest checks.
+- Service-layer watch, source, listing, scrape, digest, and notification flows.
+- Deterministic mock scraper for tests and local service checks.
+- Real registered adapters for:
+  - AutoTempest.
+  - Cars On Line.
+  - Corvette Magazine classifieds.
+  - VetteFinders.
+- Diagnostic testing for unsupported URLs.
+- User-triggered immediate scraping through `/watch_scrape_now` and the
+  `scrape_now` option on `/watch_add`.
+- Scheduled digests at each watch's notification time.
+- Per-watch public Discord threads for listing embeds and digest messages.
+- Static USD to AUD conversion through `USD_TO_AUD_RATE`.
+- Mileage display in the watch's preferred distance unit, defaulting to
+  kilometres.
 
-## Explicit Non-MVP
+## Explicitly Out Of Scope
 
-- Real production website scraping.
 - Facebook Marketplace support.
-- Browser automation.
-- Image processing.
-- User-facing website or dashboard.
-- Real-time alerts outside scheduled digests.
-- Machine-learning ranking or recommendation.
-- Payment, subscriptions, or multi-tenant SaaS management.
-- Reusable bot plugin architecture.
+- Browser automation or challenge bypassing.
+- Direct Cars.com, Gateway Classic Cars, or Streetside Classics scraping while
+  polite requests receive challenge responses.
+- Carsales scraping until a concrete target URL and permission posture exist.
+- A user-facing web dashboard.
+- Payment, subscription, or SaaS management features.
+- Reusable plugin architecture.
+- Machine-learning ranking.
 
-## Product Behaviours
+## Watch Behavior
 
-### Watches
+A watch currently stores:
 
-A watch describes what a user wants to find:
-
-- Name.
+- Discord owner.
+- Discord guild, channel, and resolved thread id.
+- Car query.
 - Included keywords.
 - Excluded keywords.
 - Preferred currency.
-- Distance unit, defaulting to kilometres.
-- Notification time.
-- One or more enabled sources.
-- Discord delivery target, initially the channel where the watch is created unless changed by command.
+- Distance unit.
+- Notification time and timezone.
+- Criteria version and active state.
 
-### Sources
+Material keyword or source changes increment `criteria_version`. Watch commands
+scope operations to the interacting Discord user.
 
-A source describes where listings may come from:
+## Source Behavior
 
-- Built-in mock source for MVP development and tests.
-- Custom website source records that can be added by users, but only exercised through source test behaviour in MVP.
-- Source enablement per watch.
-- Custom website source tests may fetch and inspect a page, but they must not create listings or participate in scheduled collection in v1.
+Users attach sources to watches with `/watch_source_add` or during
+`/watch_add`. The URL host determines the source kind for known adapters:
 
-### Collection
+- `autotempest.com` -> `autotempest`.
+- `cars-on-line.com` -> `cars_on_line`.
+- `corvette-mag.com` -> `corvette_magazine`.
+- `vettefinders.com` -> `vettefinders`.
+- Other domains -> `custom_website`.
 
-The bot periodically checks active watches and their enabled sources. Listings are filtered against watch keywords, normalized, deduplicated, converted into the user's preferred display units, and stored for the next digest.
+Runtime source addition is configured with `allow_unregistered_sources=False`,
+so `custom_website` URLs are rejected for attachment unless a test harness
+injects a custom adapter. `/watch_source_test` can still run a diagnostic fetch
+for unsupported domains and report sampled links and warnings without enabling
+scheduled scraping.
 
-MVP scheduled collection must only use sources backed by a scraper adapter, initially the built-in mock source. User-owned custom website sources are testable records, not production scrape sources.
+Facebook URLs are rejected.
 
-### Digests
+## Listing And Notification Behavior
 
-At the configured notification time, the bot sends a Discord digest containing new listings collected since the previous digest for that watch. After a successful send, those listing deliveries are marked as sent so they are not repeated in future digests.
+Scheduled scrape jobs collect listings from registered adapters and store
+matching rows silently. Scheduled digest jobs later read stored pending listings
+and post them to the watch thread when the watch's local notification time is
+due. Empty due digests post a no-update confirmation and update the watch's last
+digest timestamp.
+
+Manual user-triggered scraping is intentionally more immediate:
+
+- `/watch_add` defaults `scrape_now` to true when source URLs are supplied.
+- `/watch_scrape_now` scrapes one owned watch immediately.
+- New listings from those manual flows are posted as embeds to the watch thread
+  and then marked sent.
+- `/watch_listings` posts visible listing history, including sent listings.
 
 ## Success Criteria
 
-- A user can create a watch from Discord slash commands.
-- Mock listings matching the watch are stored without immediate notification.
-- A scheduled digest posts unsent matching listings at the configured time.
-- Duplicate mock listings are not repeatedly delivered.
-- Prices are displayed in the watch's preferred currency.
-- Mileage displays in kilometres by default.
-- A source test command reports whether a custom source appears structurally usable without adding real scraping.
-- Failed scheduled scrape attempts are recorded for diagnostics without notifying users.
-
-## Risks
-
-- Real website terms, anti-bot systems, and page changes will affect future scraping design.
-- Exchange rate accuracy depends on the selected rate provider or static MVP rates.
-- Discord interaction timeouts require commands to defer responses for longer operations.
-- Time zone handling must be explicit to avoid sending digests at surprising times.
+- The bot starts from `PYTHONPATH=src python -m car_watch_bot.main` with a valid
+  Discord token.
+- Slash commands sync in a configured development guild.
+- A user can create, list, update, and deactivate watches.
+- A user can add, list, test, and remove watch sources.
+- Known source URLs are classified into the registered source kinds.
+- Unsupported source tests return structured diagnostics without enabling
+  production scraping.
+- Scrape runs deduplicate listings and avoid duplicate pending deliveries.
+- Scheduled digests only send due watches once per local notification minute.
+- Per-watch Discord threads are created, reused, and persisted.
+- Tests pass without Discord credentials or live network calls.

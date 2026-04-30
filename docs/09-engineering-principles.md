@@ -1,57 +1,54 @@
 # Engineering Principles
 
-## Purpose
-
-This document defines architectural and design rules for V8Bot. These rules are intentionally strict. If a proposed implementation violates them, change the implementation, not the rule, unless the product requirements are explicitly revised.
-
 ## Core Philosophy
 
-- Build for correctness first, scraping later.
-- Develop mock-first. The mock scraper must prove the data flow before any real scraper exists.
-- Prefer deterministic behaviour over cleverness.
-- Make boring, testable choices.
-- Treat scraping as unreliable input, not as the core product.
-- The core product is reliable watch management, dedupe, persistence, and scheduled digest delivery.
+- Treat Discord as an interface, not the application core.
+- Keep watch management, source management, scraping, dedupe, and digest state
+  testable without Discord.
+- Treat scraping as unreliable input.
+- Prefer deterministic behavior over cleverness.
+- Prefer polite static source adapters over browser automation.
+- Keep local runtime data and secrets out of git.
 
 ## Layered Architecture
 
-The dependency direction is strict:
+Dependency direction:
 
 ```text
 bot -> services -> repositories -> database
+                  -> scrapers
+                  -> core helpers
+scheduler -> services
 ```
 
 Rules:
 
-- `bot/` must never access the database directly.
-- `bot/` must never import SQLAlchemy models or repositories.
-- `bot/` may call services and presenters only.
-- Services contain business logic and orchestration.
-- Repositories contain database access and persistence rules.
-- Database models do not contain Discord command behaviour.
-- Scrapers must not know about Discord.
-- Scrapers must not know about the database.
-- Scrapers must not send messages, write rows, schedule jobs, or update watch state.
+- `bot/` must not access repositories or SQLAlchemy models directly.
+- Services own business logic and orchestration.
+- Repositories own persistence details.
+- Scrapers extract listing candidates only.
+- Scheduler jobs delegate to services.
 - Cross-layer shortcuts are not allowed for convenience.
 
-## Data Flow Rules
+## Data Flow
 
-The normal collection flow is:
+Normal scheduled collection:
 
-1. Scrapers produce raw listing candidates.
-2. Services normalize, validate, filter, score when scoring exists, convert units and currency, and decide what should be persisted.
-3. Repositories persist listings, matches, attempts, and delivery state.
-4. Digest services read persisted data only.
-5. Discord presenters render digest payloads for users.
+1. Scheduler invokes `collect_listings_job`.
+2. `ScrapeService` selects active watches and enabled sources.
+3. Registered adapters return `ListingCandidate` rows.
+4. Services score, filter, convert, dedupe, and persist matches.
+5. Later, scheduler invokes `send_due_digests_job`.
+6. `NotificationService` builds stored digest payloads and sends them through a
+   `DigestSender`.
+7. Successful sends mark watch listings sent.
 
-Rules:
+Manual scrape flow:
 
-- Scrapers extract listing data only.
-- Services enrich and coordinate.
-- Repositories persist.
-- Digests must not call scrapers.
-- Digests must not inspect live websites.
-- Digest output must be reproducible from stored data.
+1. Discord command calls `ListingService.scrape_watch_now`.
+2. The same scrape service path stores matches.
+3. The command posts newly pending listings to the watch thread.
+4. The command marks those posted listings sent.
 
 ## Idempotency
 
@@ -59,91 +56,75 @@ Scraping must be safe to run repeatedly.
 
 Rules:
 
-- Re-running a scrape must not duplicate listings.
-- Re-running a scrape must not duplicate pending watch deliveries.
-- Dedupe must be enforced at repository and database constraint level, not only in memory.
-- Use source id plus external id, canonical URL, or content hash for listing identity.
-- Use unique watch-listing relationships for per-watch delivery identity.
-- Services should treat duplicate insert attempts as expected behaviour.
+- Re-running a scrape must not duplicate listing rows for the same source URL.
+- Re-running a scrape must not duplicate watch-listing rows.
+- Existing listings should be refreshed on rediscovery.
+- Posted or digested listings should be marked sent.
+- Unique database constraints should backstop service-level dedupe.
 
-## Scheduling Rules
+## Scheduling
 
-Scraping and notifications are separate systems.
+Scraping and notification are separate systems.
 
 Rules:
 
-- Scraping jobs collect and store listings silently.
-- Notification jobs read stored pending listings.
-- Notification jobs must not scrape.
-- Scraping jobs must not send Discord messages.
-- No real-time listing alerts in MVP.
-- Scheduled digest delivery is the only MVP notification path.
-- A failed scrape must not block a later digest from sending already persisted listings.
+- Scheduled scraping stores listings silently.
+- Scheduled digests read stored pending listings only.
+- Digest sends must not scrape live websites.
+- A failed scrape must not block a later digest from sending already-persisted
+  listings.
+- Due digest checks must not send the same watch twice in the same local minute.
 
 ## Source Isolation
 
-Each source must be isolated.
+Each source adapter is isolated.
 
 Rules:
 
-- Each scraper adapter is independent.
-- A failure in one source must not stop other sources from running.
-- Source-specific parsing must stay inside that source adapter.
-- Source-specific failures must be recorded as scrape attempts.
-- No source adapter may mutate shared scraper state in a way that affects another source.
-- A source without a registered adapter must be skipped, not guessed.
-- Custom website source tests must not be treated as production scrapers.
-
-## Extensibility
-
-New features should attach to existing boundaries.
-
-Rules:
-
-- Adding a new source should require changes in `scrapers/` and adapter registration only.
-- Adding a new source must not require changes to watch logic, digest logic, Discord commands, or repositories, unless the shared adapter interface itself changes.
-- Adding a new command should not modify core business logic.
-- Commands should expose existing service capabilities.
-- New presentation formats should not modify services.
-- New storage queries belong in repositories, not command handlers or scrapers.
+- A failure in one adapter call should be recorded and contained.
+- A source without a registered adapter is skipped, not guessed.
+- Diagnostic source tests are not production scrapers.
+- Source-specific parsing belongs inside that source adapter.
+- New sources should require adapter registration and source-kind inference, not
+  changes throughout watch or digest logic.
 
 ## Testability
 
-Core logic must be easy to test without Discord or network access.
+Core logic must be easy to test without Discord or live network calls.
 
 Rules:
 
-- All core logic must be testable without connecting to Discord.
-- All core logic must be testable without live network calls.
-- Services should be pure or near-pure where possible.
-- Time, currency rates, scraper adapters, and Discord senders must be injectable.
-- Tests should use fake clocks, fake senders, deterministic scraper output, and temporary SQLite databases.
-- Parser tests for future real scrapers must use saved HTML fixtures.
-- A feature that cannot be tested without Discord should be redesigned.
+- Use in-memory SQLite for repository/service tests.
+- Use fake senders for notification tests.
+- Use saved HTML fixtures or mocked transports for parser tests.
+- Use fixed conversion rates.
+- Use explicit datetimes for notification scheduling tests.
+- Redesign features that cannot be tested without Discord API access.
 
 ## Failure Handling
 
-Scraping failures are normal.
+Scrape failures are normal.
 
 Rules:
 
-- The system must degrade gracefully when a source fails.
-- A scrape failure must not crash the bot.
-- A scrape failure must not stop unrelated watches or sources.
-- Failed scrapes must be recorded for diagnostics.
+- Scrape failures must not crash the bot.
 - User-facing errors must be structured and safe.
-- Internal logs may include exception details, but must not leak secrets.
-- Failed digest sends must leave pending listings retryable unless a partial send is explicitly handled.
+- Internal logs may include exception details but must not leak secrets.
+- Failed digest sends should leave pending listings retryable unless a partial
+  send strategy is explicitly implemented.
+- Unsupported domains should return diagnostics without enabling scheduled
+  scraping.
 
 ## Future Compatibility
 
-Discord is one interface, not the application core.
+The current implementation is Discord-first, but service boundaries should stay
+interface-neutral enough for future reuse.
 
 Rules:
 
-- Design services so a future web UI can reuse them.
-- Do not pass Discord interaction objects into services.
-- Do not bake Discord response formatting into core models.
-- Keep user ownership explicit and interface-neutral.
-- Keep DTOs independent of Discord-specific types unless they live in `bot/`.
-- A future website should be able to create watches, manage sources, inspect attempts, and render digests through the same service layer.
+- Do not pass Discord interactions into services.
+- Keep user ownership explicit.
+- Keep DTOs and dataclasses free of Discord-specific types unless they live in
+  `bot/`.
+- New presentation formats should not modify scraper or repository behavior.
+- New storage queries belong in repositories.

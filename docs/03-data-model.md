@@ -1,260 +1,246 @@
 # Data Model
 
-## Goals
+## Overview
 
-The data model must support Discord-owned MVP usage while keeping enough separation for a future website. It should track users, watches, sources, listings, and delivery state without coupling all business logic to Discord commands.
+The current schema is defined in `src/car_watch_bot/db/models.py` and created by
+`init_database`. It is a local SQLite-friendly prototype schema with no migration
+framework.
 
-## Entities
+## User
 
-### User
-
-Represents a person using the bot.
+Table: `users`.
 
 Fields:
 
-- `id`: internal primary key.
-- `discord_user_id`: Discord user id, required for MVP Discord users and nullable later for website-only users.
+- `id`: primary key.
+- `discord_user_id`: required unique Discord user id string.
 - `created_at`.
 - `updated_at`.
 
-Future fields:
+Rules:
 
-- Website account id.
-- Email.
-- Preferences shared across watches.
+- Users are created idempotently by Discord id.
+- Website-only users are not implemented.
 
-### Watch
+## Watch
 
-Represents a saved car search.
+Table: `watches`.
 
 Fields:
 
-- `id`: internal primary key.
-- `user_id`: owner.
-- `guild_id`: Discord guild id, nullable for future direct-message or website usage.
-- `channel_id`: Discord channel for digest delivery.
-- `name`.
-- `included_keywords`: normalized list stored as JSON.
-- `excluded_keywords`: normalized list stored as JSON.
-- `preferred_currency`: ISO-style currency code, such as `AUD`, `USD`, `NZD`.
+- `id`: primary key.
+- `user_id`: owner foreign key.
+- `guild_id`: Discord guild id, nullable.
+- `channel_id`: Discord channel id, nullable.
+- `thread_id`: resolved per-watch Discord thread id, nullable.
+- `name`: currently set from the car query.
+- `query`: car query used by scoring.
+- `included_keywords`: JSON list.
+- `excluded_keywords`: JSON list.
+- `preferred_currency`: default `AUD`.
 - `distance_unit`: `km` or `mi`, default `km`.
 - `notification_time`: local time of day.
-- `timezone`: IANA timezone, default from config.
-- `criteria_version`: integer incremented when matching criteria or enabled source set changes.
+- `timezone`: default `Australia/Sydney`.
+- `criteria_version`: starts at `1`.
 - `is_active`.
-- `deactivated_at`: nullable.
+- `deactivated_at`.
 - `last_digest_sent_at`.
 - `created_at`.
 - `updated_at`.
 
 Rules:
 
-- A watch must have at least one included keyword.
-- Excluded keywords are optional.
-- Notification time is required.
-- Distance unit defaults to kilometres.
+- Watch creation requires a non-empty car query and at least one included
+  keyword.
+- Keyword and source association changes increment `criteria_version`.
+- Watch operations are scoped to the Discord owner.
+- Digest delivery requires `channel_id`; thread id is resolved and persisted
+  after the first send.
 
-### Source
+## Source
 
-Represents a listing source known to the bot.
+Table: `sources`.
 
 Fields:
 
-- `id`: internal primary key.
-- `owner_user_id`: nullable; null means built-in source.
+- `id`: primary key.
+- `owner_user_id`: nullable; null can represent built-in/global sources.
 - `name`.
-- `kind`: `mock`, `custom_website`, or future adapter kinds.
+- `kind`: source adapter kind.
 - `base_url`.
-- `config`: JSON for source-specific metadata.
+- `config_json`: JSON metadata field.
 - `is_active`.
-- `deactivated_at`: nullable.
-- `last_tested_at`: nullable.
-- `last_test_status`: nullable `passed`, `warning`, or `failed`.
+- `deactivated_at`.
+- `last_tested_at`.
+- `last_test_status`.
 - `created_at`.
 - `updated_at`.
 
-MVP rules:
+Constraints:
 
-- Built-in mock source is enabled for development and tests.
-- Custom website sources can be stored and tested.
-- Custom website sources must not perform production scraping in v1.
-- Facebook Marketplace sources are rejected in v1.
-- User-owned sources can only be attached to watches owned by the same user. Built-in sources can be attached to any user's watch.
+- Unique `(owner_user_id, name)`.
 
-### WatchSource
+Current source kinds:
 
-Join table for enabled sources on a watch.
+- `mock`.
+- `autotempest`.
+- `cars_on_line`.
+- `corvette_magazine`.
+- `vettefinders`.
+- `custom_website` for unsupported domains in tests or legacy data.
+
+Runtime source addition rejects unregistered source kinds when the app is wired
+through `main.py`.
+
+## WatchSource
+
+Table: `watch_sources`.
 
 Fields:
 
-- `id`.
+- `id`: primary key.
 - `watch_id`.
 - `source_id`.
 - `is_enabled`.
-- `disabled_at`: nullable.
+- `disabled_at`.
 - `created_at`.
 - `updated_at`.
 
+Constraints:
+
+- Unique `(watch_id, source_id)`.
+
 Rules:
 
-- A watch can use many sources.
-- A source can belong to many watches.
-- A disabled source remains associated for future re-enable workflows.
+- Adding an existing disabled association re-enables it.
+- Removing a source from a watch disables the association rather than deleting
+  the source row.
+- Add/remove operations increment the watch criteria version.
 
-### Listing
+## Listing
 
-Represents a normalized listing discovered from a source.
+Table: `listings`.
 
 Fields:
 
-- `id`.
+- `id`: primary key.
 - `source_id`.
 - `external_id`: nullable source-provided id.
-- `url`.
+- `url`: required listing URL.
 - `title`.
-- `description`: nullable.
-- `price_amount`: nullable decimal.
-- `price_currency`: nullable currency code.
-- `mileage_value`: nullable integer.
-- `mileage_unit`: nullable `km` or `mi`.
-- `location_text`: nullable.
-- `image_url`: nullable.
-- `seller_name`: nullable.
-- `listed_at`: nullable.
+- `description`.
+- `price_amount`.
+- `price_currency`.
+- `converted_price_amount`.
+- `converted_price_currency`.
+- `mileage_value`.
+- `mileage_unit`.
+- `converted_mileage_value`.
+- `converted_mileage_unit`.
+- `location_text`.
+- `score`.
+- `score_reasons`: JSON list.
+- `content_hash`.
+- `raw_payload`: JSON metadata from the scraper.
 - `first_seen_at`.
 - `last_seen_at`.
-- `content_hash`: normalized fingerprint.
-- `raw_payload`: JSON for debugging.
 
-Rules:
+Constraints:
 
-- URL is required.
-- Each digest item must include a link.
-- Deduplication should prefer `(source_id, external_id)` when available, then canonical URL, then content hash.
+- Unique `(source_id, url)`.
+- Unique `(source_id, external_id)`.
 
-### WatchListing
+Current dedupe behavior:
 
-Represents a listing matched to a watch.
+- Repository lookup and upsert are URL-first.
+- `external_id` uniqueness is present as a database constraint.
+- `content_hash` is stored but not currently used as the primary upsert lookup.
+- Rediscovered rows are refreshed with latest listing fields, score, conversion,
+  raw payload, and `last_seen_at`.
+
+## WatchListing
+
+Table: `watch_listings`.
 
 Fields:
 
-- `id`.
+- `id`: primary key.
 - `watch_id`.
 - `listing_id`.
 - `matched_at`.
-- `watch_criteria_version`: criteria version used when the listing matched.
-- `status`: `pending_digest`, `sent`, `dismissed`.
-- `sent_at`: nullable.
-- `digest_batch_id`: nullable.
+- `watch_criteria_version`.
+- `status`: currently `pending_digest`, `sent`, or `excluded`.
+- `sent_at`.
+
+Constraints:
+
+- Unique `(watch_id, listing_id)`.
 
 Rules:
 
-- A listing can match multiple watches.
-- A listing should be sent at most once per watch unless explicitly reset.
-- If matching criteria change, the watch's `criteria_version` is incremented. Digest selection should only include pending rows for the current criteria version, or explicitly revalidate older pending rows before sending.
+- One listing can match many watches.
+- A watch-listing pair is only created once.
+- Sent listings are not re-posted by scheduled digests.
+- Listings rejected by updated exclusions can be marked `excluded`.
+- If an excluded listing later matches again, it can be moved back to
+  `pending_digest`.
 
-### DigestBatch
+## ScrapeAttempt
 
-Represents one digest send attempt.
-
-Fields:
-
-- `id`.
-- `watch_id`.
-- `scheduled_for`.
-- `sent_at`: nullable.
-- `status`: `pending`, `sent`, `failed`, `empty`.
-- `listing_count`.
-- `discord_message_id`: nullable.
-- `error_message`: nullable.
-
-Rules:
-
-- Empty digests may be recorded without sending a Discord message, depending on product choice.
-- Failed digests should leave listings in `pending_digest` unless the send partially succeeded.
-
-### ScrapeAttempt
-
-Represents one scheduled collection attempt for a source and watch.
+Table: `scrape_attempts`.
 
 Fields:
 
-- `id`.
+- `id`: primary key.
 - `watch_id`.
 - `source_id`.
 - `started_at`.
-- `finished_at`: nullable.
-- `status`: `success`, `failed`, or `skipped`.
+- `finished_at`.
+- `status`: `success` or `failed` in the current service path.
 - `adapter_kind`.
 - `listings_seen`.
 - `listings_matched`.
 - `listings_created`.
-- `error_message`: nullable.
+- `error_message`.
 
 Rules:
 
-- Failed scrape attempts are recorded silently and do not notify users in MVP.
-- Custom website sources without a production adapter should be recorded as `skipped` only if the scheduler evaluates them; preferably the scheduler should ignore non-adapter sources.
-- Attempts provide diagnostics for admins and future dashboards.
+- Successful adapter calls record counts.
+- Adapter exceptions record failed attempts and do not crash the scrape cycle.
+- Sources without registered adapters are skipped before adapter invocation in
+  `ListingService.scrape_watch_now`; that path returns warnings but does not
+  create a skipped attempt row.
 
-### SourceTestAttempt
+## SourceTestAttempt
 
-Represents one user-triggered custom source test.
+Table: `source_test_attempts`.
 
 Fields:
 
-- `id`.
-- `source_id`: nullable when testing a URL before saving it.
+- `id`: primary key.
+- `source_id`: nullable.
 - `user_id`.
 - `url`.
 - `started_at`.
-- `finished_at`: nullable.
+- `finished_at`.
 - `status`: `passed`, `warning`, or `failed`.
-- `notes`: JSON or text summary.
-- `detected_links`: JSON list of sample links.
-- `error_message`: nullable.
+- `notes`: JSON list of warnings.
+- `detected_links`: JSON list, currently stored as an empty list by the service.
+- `error_message`.
 
 Rules:
 
-- Source tests never create `Listing` or `WatchListing` records.
-- Source tests may update `Source.last_tested_at` and `Source.last_test_status`.
+- Source tests never create listings.
+- Add-source source tests are recorded against the created source when accepted.
+- Rejected add-source attempts are recorded without a source id when validation
+  reaches the source-test phase.
+- `/watch_source_test` records diagnostics for the user even when the URL cannot
+  be attached as a production source.
 
-## Pydantic Boundary Models
+## Not Implemented In The Current Schema
 
-Suggested models:
-
-- `WatchCreate`.
-- `WatchUpdate`.
-- `WatchView`.
-- `SourceCreate`.
-- `SourceTestResult`.
-- `ScrapeAttemptView`.
-- `SourceTestAttemptView`.
-- `ListingCandidate`.
-- `NormalizedListing`.
-- `DigestListing`.
-- `DigestPayload`.
-
-Use Pydantic models at service boundaries and command presenters. SQLAlchemy models should remain persistence concerns.
-
-## Indexes and Constraints
-
-Recommended constraints:
-
-- Unique `users.discord_user_id` when not null.
-- Unique source name per owner for user-owned sources.
-- Unique `(source_id, external_id)` when `external_id` is not null.
-- Unique `(source_id, url)`.
-- Unique `(watch_id, listing_id)` for watch matches.
-- Unique `(watch_id, source_id)` for watch-source associations.
-
-Recommended indexes:
-
-- `watches.user_id`.
-- `watches.is_active`.
-- `watch_listings.watch_id, status`.
-- `listings.source_id`.
-- `listings.first_seen_at`.
-- `digest_batches.watch_id, scheduled_for`.
-- `scrape_attempts.watch_id, source_id, started_at`.
-- `source_test_attempts.user_id, started_at`.
+- There is no `digest_batches` table.
+- Listing image URL, seller name, and listed-at fields are not persisted.
+- User email, website account linkage, and global preferences are not
+  implemented.
+- Database migrations are not implemented.

@@ -1,64 +1,86 @@
 # Read This First
 
-## Purpose
+## Current Purpose
 
-This repository is still in planning mode. Future agents should read these docs before writing application code and should keep the MVP small: a standalone Discord bot, mock scheduled scraping only, custom source tests only, and scheduled digests only.
+This repository is a working Python 3.11+ Discord bot prototype for car listing
+watches. The importable package is `car_watch_bot`. Users create watches from
+Discord, attach supported listing sources, scrape those sources manually or on a
+schedule, and receive listing embeds in watch-specific Discord threads.
 
-## Canonical Implementation Order
+The current implementation is no longer only a planning skeleton. These docs
+describe the code that exists now.
 
-1. Read all files in `docs/` before changing code.
-2. Create the project skeleton and configuration.
-3. Build the database models and repositories.
-4. Build core services for users, watches, sources, source tests, scraping, dedupe, currency, units, and digests.
-5. Add the mock scraper adapter and scraper registry.
-6. Add APScheduler jobs for collection and digest checks.
-7. Add Discord slash commands as thin adapters over core services.
-8. Add tests alongside each milestone.
-9. Update docs and README after implementation decisions become concrete.
+## Current Runtime Shape
 
-## Non-Negotiable MVP Rules
+- Discord runtime and slash commands live under `src/car_watch_bot/bot/`.
+- Business logic lives under `src/car_watch_bot/services/`.
+- SQLAlchemy setup, models, and repositories live under `src/car_watch_bot/db/`.
+- Scraper adapters live under `src/car_watch_bot/scrapers/`.
+- APScheduler jobs live under `src/car_watch_bot/scheduler/`.
+- Local scripts live under `scripts/`.
+- Tests live under `tests/` and use in-memory SQLite plus mocked HTTP clients.
 
-- Do not implement real website scraping yet.
-- Do not implement Facebook Marketplace support in v1.
-- Do not send immediate listing alerts.
-- Do not make this a reusable plugin.
-- Do not put Discord interaction objects inside core services.
-- Do not let custom website sources participate in scheduled scraping until a real adapter exists.
-- Do not create listings from source tests.
+## Current Capabilities
 
-## Key Architecture Constraints
+- Watches store a car query, included keywords, excluded keywords, notification
+  time, preferred currency, distance unit, Discord channel, and resolved thread.
+- Sources can be added to a watch from one or more URLs. Blank names are derived
+  from the domain and made unique per user.
+- Registered scheduled source kinds are `mock`, `autotempest`, `cars_on_line`,
+  `corvette_magazine`, and `vettefinders`.
+- Unsupported URLs can be tested diagnostically, but runtime source addition is
+  configured to reject unregistered source kinds.
+- Manual commands can scrape immediately and post new listing embeds to the
+  watch thread. Posted listings are then marked sent.
+- Scheduled scrape collection stores matching listings silently.
+- Scheduled digest checks post pending listings, or a no-update confirmation,
+  when a watch's local notification time is due.
+- Discord output is routed to a per-watch public thread named from the watch
+  query and keywords.
 
-- Multiple Discord users must be supported from the start.
-- Each user can have multiple watches.
-- Each watch can have multiple sources through `WatchSource`.
-- Built-in sources can be shared globally.
-- User-owned custom sources must be scoped by owner.
-- Scheduled digests are per watch and delivered to the watch's stored Discord channel.
-- Core services should be reusable by a future web dashboard.
+## Non-Negotiable Rules
 
-## Data Model Watchpoints
+- Do not log, print, commit, or copy secrets from `.env`.
+- Do not support Facebook Marketplace in this version.
+- Do not bypass anti-bot or challenge systems.
+- Do not treat unsupported diagnostic source tests as production scrapers.
+- Do not put Discord interaction objects in services, repositories, scrapers, or
+  scheduler business logic.
+- Do not let scrapers write to the database or send Discord messages.
+- Do not bypass the service layer from Discord commands.
+- Do not add a web dashboard or plugin architecture unless explicitly requested.
 
-The implementation should include records for:
+## Important Current Limitations
 
-- Pending and sent watch listings.
-- Digest batches.
-- Scrape attempts, including failures.
-- Source test attempts.
-- Source activation and deactivation.
-- Watch criteria versioning so material watch edits do not accidentally send stale pending matches.
+- There is no migration framework. `init_database` creates tables and includes
+  one compatibility helper that adds `watches.thread_id` to older local SQLite
+  databases.
+- There is no `DigestBatch` table in the current schema. Digest state is tracked
+  through `watch_listings.status`, `watch_listings.sent_at`, and
+  `watches.last_digest_sent_at`.
+- Currency conversion is intentionally narrow: current service conversion only
+  handles same-currency values and USD to AUD through `USD_TO_AUD_RATE`.
+- Direct Cars.com, Gateway Classic Cars, and Streetside Classics adapters are
+  not registered because polite HTTP requests receive challenge responses.
+- Carsales has no adapter because there is not yet a concrete target URL and
+  permission posture.
 
-## Recommended First Coding Pass
+## Development Defaults
 
-Start with boring foundations:
+Use the README commands for setup and local running:
 
-- `pyproject.toml` and dependencies.
-- `v8bot/config.py` using Pydantic settings.
-- SQLAlchemy engine/session setup.
-- SQLAlchemy models matching `docs/03-data-model.md`.
-- Repository tests with temporary SQLite.
+```bash
+PYTHONPATH=src python -m car_watch_bot.main
+pytest
+python -m compileall src tests scripts
+```
 
-Delay Discord command work until the core services can be tested without Discord.
+For docs-only changes, a filesystem sanity check and `git status --short` are
+usually enough.
 
 ## When Docs Disagree
 
-Treat this file and `docs/01-product-requirements.md` as product authority. Treat `docs/03-data-model.md` as persistence authority. If an implementation detail conflicts with MVP constraints, preserve the MVP constraint and update the affected doc before coding.
+Prefer the current code and tests as the source of truth, then update these docs
+as part of the same change. If the requested change is product-level rather than
+a bug fix, update docs first so the intended behavior is explicit before code
+changes follow.
