@@ -253,6 +253,16 @@ The default compose file is rootless-Podman friendly. It uses the `:U` volume
 flag so the non-root container user can write the SQLite database under
 `./data`.
 
+On SELinux-enabled hosts, create an untracked local override so Podman also
+relabels the bind mount:
+
+```yaml
+services:
+  car-watch-bot:
+    volumes:
+      - ./data:/data:Z,U
+```
+
 Prepare:
 
 ```bash

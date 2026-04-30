@@ -65,6 +65,7 @@ db.sqlite3-journal
 car_watch_bot.sqlite3
 car_watch_bot.sqlite3-journal
 data/
+docker-compose.override.yml
 
 # Flask stuff:
 instance/
