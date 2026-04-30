@@ -15,6 +15,7 @@ from car_watch_bot.db.repositories import (
     WatchRepository,
 )
 from car_watch_bot.scrapers.base import ScraperAdapter, ScrapeRequest
+from car_watch_bot.scrapers.diagnostic import DiagnosticScraper
 from car_watch_bot.scrapers.mock import MockScraper
 from car_watch_bot.services.watch_service import WatchNotFoundError
 
@@ -49,6 +50,14 @@ class SourceAddResult:
     source_test: SourceTestResult
 
 
+@dataclass(frozen=True)
+class _SourceNameInput:
+    """Normalized source name plus whether it was generated."""
+
+    name: str
+    is_generated: bool
+
+
 class SourceService:
     """Business operations for sources."""
 
@@ -57,21 +66,31 @@ class SourceService:
         session_factory: sessionmaker[Session],
         source_test_scraper: ScraperAdapter | None = None,
         source_test_scrapers: dict[str, ScraperAdapter] | None = None,
+        source_diagnostic_scraper: ScraperAdapter | None = None,
+        allow_unregistered_sources: bool = True,
     ) -> None:
         self.session_factory = session_factory
         self.source_test_scraper = source_test_scraper or MockScraper()
         self.source_test_scrapers = source_test_scrapers or {}
+        self.source_diagnostic_scraper = source_diagnostic_scraper or DiagnosticScraper(
+            user_agent="V8Bot diagnostic"
+        )
+        self.allow_unregistered_sources = allow_unregistered_sources
 
     async def add_source_to_watch(
         self,
         discord_user_id: str,
         watch_id: int,
-        name: str,
+        name: str | None,
         url: str,
     ) -> SourceAddResult:
         """Create a custom source, attach it to a watch, and run a source test."""
 
-        normalized_name = _normalize_source_name(name)
+        parsed_url = urlparse(url)
+        if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+            raise SourceValidationError("URL must be http or https")
+        source_name = _normalize_source_name(name, url)
+        normalized_name = source_name.name
         source_kind = _source_kind_for_url(url)
         existing_source_id: int | None = None
         with self.session_factory() as session:
@@ -79,10 +98,16 @@ class SourceService:
             watch = WatchRepository(session).get_active_for_user(watch_id, user.id)
             if watch is None:
                 raise WatchNotFoundError("watch not found")
-            existing_source = SourceRepository(session).get_by_owner_and_name(
-                user.id,
-                normalized_name,
-            )
+            source_repository = SourceRepository(session)
+            if source_name.is_generated:
+                normalized_name = _unique_generated_source_name(
+                    source_repository,
+                    user.id,
+                    source_name.name,
+                    url,
+                    source_kind,
+                )
+            existing_source = source_repository.get_by_owner_and_name(user.id, normalized_name)
             if existing_source is not None:
                 if existing_source.kind != source_kind or existing_source.base_url != url:
                     raise SourceValidationError(
@@ -91,7 +116,11 @@ class SourceService:
                 existing_source_id = existing_source.id
             session.commit()
 
-        source_test = await self._run_source_test(url, source_kind)
+        source_test = await self._run_source_test(
+            url,
+            source_kind,
+            allow_diagnostic=False,
+        )
         with self.session_factory() as session:
             user = UserRepository(session).get_or_create_by_discord_id(discord_user_id)
             if not source_test.url_accepted:
@@ -164,14 +193,24 @@ class SourceService:
         """Test a source URL."""
 
         source_kind = _source_kind_for_url(url)
-        source_test = await self._run_source_test(url, source_kind)
+        source_test = await self._run_source_test(
+            url,
+            source_kind,
+            allow_diagnostic=True,
+        )
         with self.session_factory() as session:
             user = UserRepository(session).get_or_create_by_discord_id(discord_user_id)
             self._record_source_test(session, user.id, url, source_test)
             session.commit()
             return source_test
 
-    async def _run_source_test(self, url: str, source_kind: str) -> SourceTestResult:
+    async def _run_source_test(
+        self,
+        url: str,
+        source_kind: str,
+        *,
+        allow_diagnostic: bool,
+    ) -> SourceTestResult:
         """Run source test checks."""
 
         parsed_url = urlparse(url)
@@ -180,7 +219,16 @@ class SourceService:
         if "facebook.com" in parsed_url.netloc.casefold():
             return _failed_source_test("Facebook Marketplace is not supported")
 
-        scraper = self.source_test_scrapers.get(source_kind, self.source_test_scraper)
+        scraper = self.source_test_scrapers.get(source_kind)
+        if scraper is None:
+            if allow_diagnostic:
+                scraper = self.source_diagnostic_scraper
+            elif not self.allow_unregistered_sources:
+                return _failed_source_test(
+                    f"no scraper adapter is registered for {source_kind}"
+                )
+            else:
+                scraper = self.source_test_scraper
         listings = await scraper.fetch_listings(
             ScrapeRequest(
                 source_id=0,
@@ -254,13 +302,55 @@ class SourceService:
         )
 
 
-def _normalize_source_name(name: str) -> str:
+def _normalize_source_name(name: str | None, url: str) -> _SourceNameInput:
     """Normalize a source name."""
 
-    normalized_name = name.strip()
+    explicit_name = (name or "").strip()
+    normalized_name = explicit_name or _source_name_for_url(url)
     if not normalized_name:
         raise SourceValidationError("source name is required")
-    return normalized_name
+    return _SourceNameInput(name=normalized_name, is_generated=not explicit_name)
+
+
+def _unique_generated_source_name(
+    source_repository: SourceRepository,
+    owner_user_id: int,
+    base_name: str,
+    url: str,
+    source_kind: str,
+) -> str:
+    """Return a generated source name that does not collide with another URL."""
+
+    existing_source = source_repository.get_by_owner_and_name(owner_user_id, base_name)
+    if existing_source is None or (
+        existing_source.kind == source_kind and existing_source.base_url == url
+    ):
+        return base_name
+
+    suffix = 2
+    while True:
+        candidate_name = f"{base_name} {suffix}"
+        existing_source = source_repository.get_by_owner_and_name(
+            owner_user_id,
+            candidate_name,
+        )
+        if existing_source is None or (
+            existing_source.kind == source_kind and existing_source.base_url == url
+        ):
+            return candidate_name
+        suffix += 1
+
+
+def _source_name_for_url(url: str) -> str:
+    """Build a default source name from a URL domain."""
+
+    parsed_url = urlparse(url)
+    host = parsed_url.netloc.casefold().split("@")[-1].split(":")[0]
+    if host.startswith("www."):
+        host = host.removeprefix("www.")
+    if not host:
+        return ""
+    return host.split(".")[0]
 
 
 def _failed_source_test(error_message: str) -> SourceTestResult:
@@ -300,4 +390,10 @@ def _source_kind_for_url(url: str) -> str:
     host = parsed_url.netloc.casefold()
     if host.endswith("autotempest.com"):
         return "autotempest"
+    if host.endswith("cars-on-line.com"):
+        return "cars_on_line"
+    if host.endswith("corvette-mag.com"):
+        return "corvette_magazine"
+    if host.endswith("vettefinders.com"):
+        return "vettefinders"
     return "custom_website"

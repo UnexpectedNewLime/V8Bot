@@ -1,7 +1,10 @@
 """Discord slash command registration."""
 
 import logging
+import re
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from urllib.parse import urlparse
 
 import discord
 from discord import app_commands
@@ -28,6 +31,16 @@ from car_watch_bot.services.watch_service import (
 logger = logging.getLogger(__name__)
 DISCORD_MESSAGE_LIMIT = 2000
 DISCORD_SAFE_MESSAGE_LIMIT = 1900
+URL_PATTERN = re.compile(r"https?://[^\s<>\]\),]+")
+HIDDEN_SOURCE_NOTES = {"skipped Facebook Marketplace source"}
+
+
+@dataclass(frozen=True)
+class SourceBatchAddResult:
+    """Result from adding one or more source URLs."""
+
+    added: list[SourceAddResult]
+    failed: list[tuple[str, str]]
 
 
 def register_commands(
@@ -50,7 +63,7 @@ def register_commands(
         notify_time: str,
         exclude_keywords: str = "",
         source_url: str = "",
-        source_name: str = "AutoTempest",
+        source_name: str = "",
         scrape_now: bool = True,
     ) -> None:
         async def action() -> str:
@@ -63,18 +76,28 @@ def register_commands(
                 guild_id=str(interaction.guild_id) if interaction.guild_id else None,
                 channel_id=str(interaction.channel_id) if interaction.channel_id else None,
             )
-            if not source_url.strip():
+            source_urls = _parse_source_urls(source_url)
+            _validate_source_name_usage(source_name, source_urls)
+            logger.info(
+                "watch_add created watch_id=%s user_id=%s source_url_count=%s scrape_now=%s",
+                summary.watch_id,
+                interaction.user.id,
+                len(source_urls),
+                scrape_now,
+            )
+            if not source_urls:
                 return _format_watch_created(summary)
 
-            source_result = await source_service.add_source_to_watch(
+            source_results = await _add_sources_to_watch(
+                source_service=source_service,
                 discord_user_id=str(interaction.user.id),
                 watch_id=summary.watch_id,
+                urls=source_urls,
                 name=source_name,
-                url=source_url,
             )
             scrape_result: ScrapeNowResult | None = None
             listings: list[DigestListing] = []
-            if scrape_now:
+            if scrape_now and source_results.added:
                 scrape_result = await listing_service.scrape_watch_now(
                     str(interaction.user.id),
                     summary.watch_id,
@@ -100,9 +123,17 @@ def register_commands(
                     summary.watch_id,
                     scrape_result.new_listing_ids,
                 )
-            return _format_watch_created_with_source(
+            logger.info(
+                "watch_add sources processed watch_id=%s user_id=%s added=%s failed=%s scraped=%s",
+                summary.watch_id,
+                interaction.user.id,
+                len(source_results.added),
+                len(source_results.failed),
+                scrape_result is not None,
+            )
+            return _format_watch_created_with_sources(
                 summary,
-                source_result,
+                source_results,
                 scrape_result,
             )
 
@@ -124,6 +155,15 @@ def register_commands(
             result = await listing_service.scrape_watch_now(
                 str(interaction.user.id),
                 watch_id,
+            )
+            logger.info(
+                "watch_scrape_now completed watch_id=%s user_id=%s sources_seen=%s sources_scraped=%s listings_created=%s pending=%s",
+                watch_id,
+                interaction.user.id,
+                result.sources_seen,
+                result.sources_scraped,
+                result.listings_created,
+                result.pending_listings,
             )
             listings = listing_service.list_watch_listings(
                 str(interaction.user.id),
@@ -250,17 +290,34 @@ def register_commands(
     async def watch_source_add(
         interaction: discord.Interaction,
         watch_id: int,
-        name: str,
         url: str,
+        name: str = "",
     ) -> None:
         async def action() -> str:
-            result = await source_service.add_source_to_watch(
+            urls = _parse_source_urls(url)
+            _validate_source_name_usage(name, urls)
+            logger.info(
+                "watch_source_add request watch_id=%s user_id=%s url_count=%s explicit_name=%s",
+                watch_id,
+                interaction.user.id,
+                len(urls),
+                bool(name.strip()),
+            )
+            result = await _add_sources_to_watch(
+                source_service=source_service,
                 discord_user_id=str(interaction.user.id),
                 watch_id=watch_id,
+                urls=urls,
                 name=name,
-                url=url,
             )
-            return _format_source_added(result)
+            logger.info(
+                "watch_source_add completed watch_id=%s user_id=%s added=%s failed=%s",
+                watch_id,
+                interaction.user.id,
+                len(result.added),
+                len(result.failed),
+            )
+            return _format_sources_added(result)
 
         await _send_ephemeral_result(interaction, action, "failed to add source")
 
@@ -297,6 +354,15 @@ def register_commands(
     async def watch_source_test(interaction: discord.Interaction, url: str) -> None:
         async def action() -> str:
             result = await source_service.test_source_url(str(interaction.user.id), url)
+            logger.info(
+                "watch_source_test completed user_id=%s accepted=%s listings_found=%s warnings=%s errors=%s domain=%s",
+                interaction.user.id,
+                result.url_accepted,
+                result.listings_found,
+                len(result.warnings),
+                len(result.errors),
+                _source_domain(url),
+            )
             return _format_source_test(result)
 
         await _send_ephemeral_result(interaction, action, "failed to test source")
@@ -364,23 +430,57 @@ async def _send_ephemeral_result(
 ) -> None:
     """Run a command action and send an ephemeral response."""
 
+    command_name = interaction.command.name if interaction.command else "unknown"
+    logger.info(
+        "discord command start command=%s user_id=%s guild_id=%s channel_id=%s",
+        command_name,
+        interaction.user.id,
+        interaction.guild_id,
+        interaction.channel_id,
+    )
     await interaction.response.defer(ephemeral=True)
     try:
         message = await action()
     except (WatchValidationError, SourceValidationError) as exc:
+        logger.info(
+            "discord command validation failed command=%s user_id=%s error=%s",
+            command_name,
+            interaction.user.id,
+            exc,
+        )
         await _send_ephemeral_message(interaction, str(exc))
         return
     except WatchNotFoundError:
+        logger.info(
+            "discord command watch not found command=%s user_id=%s",
+            command_name,
+            interaction.user.id,
+        )
         await _send_ephemeral_message(interaction, "watch not found or not owned by you")
         return
     except SourceNotFoundError:
+        logger.info(
+            "discord command source not found command=%s user_id=%s",
+            command_name,
+            interaction.user.id,
+        )
         await _send_ephemeral_message(interaction, "source not found for watch")
         return
     except Exception:
-        logger.exception("discord command failed")
+        logger.exception(
+            "discord command failed command=%s user_id=%s",
+            command_name,
+            interaction.user.id,
+        )
         await _send_ephemeral_message(interaction, fallback_message)
         return
 
+    logger.info(
+        "discord command success command=%s user_id=%s response_chars=%s",
+        command_name,
+        interaction.user.id,
+        len(message),
+    )
     await _send_ephemeral_message(interaction, message)
 
 
@@ -425,6 +525,72 @@ async def _send_public_listing_embeds(
             ),
             silent=True,
         )
+
+
+def _parse_source_urls(raw_urls: str) -> list[str]:
+    """Parse one or more source URLs from a command field."""
+
+    urls: list[str] = []
+    seen_urls: set[str] = set()
+    for match in URL_PATTERN.finditer(raw_urls):
+        url = match.group(0).rstrip(".,;")
+        if url and url not in seen_urls:
+            urls.append(url)
+            seen_urls.add(url)
+    return urls
+
+
+def _validate_source_name_usage(name: str, urls: list[str]) -> None:
+    """Validate optional source name usage."""
+
+    if not urls:
+        return
+    if len(urls) > 1 and name.strip():
+        raise SourceValidationError("name can only be used with a single URL")
+
+
+async def _add_sources_to_watch(
+    *,
+    source_service: SourceService,
+    discord_user_id: str,
+    watch_id: int,
+    urls: list[str],
+    name: str,
+) -> SourceBatchAddResult:
+    """Add many source URLs and collect per-URL failures."""
+
+    if not urls:
+        raise SourceValidationError("source url is required")
+
+    added: list[SourceAddResult] = []
+    failed: list[tuple[str, str]] = []
+    for index, url in enumerate(urls):
+        source_name = name if index == 0 else ""
+        try:
+            result = await source_service.add_source_to_watch(
+                discord_user_id=discord_user_id,
+                watch_id=watch_id,
+                name=source_name,
+                url=url,
+            )
+            added.append(result)
+            logger.info(
+                "source add succeeded watch_id=%s source_id=%s kind=%s domain=%s listings_found=%s",
+                watch_id,
+                result.source.source_id,
+                result.source.kind,
+                _source_domain(url),
+                result.source_test.listings_found,
+            )
+        except SourceValidationError as exc:
+            failed.append((url, str(exc)))
+            logger.info(
+                "source add failed watch_id=%s domain=%s error=%s",
+                watch_id,
+                _source_domain(url),
+                exc,
+            )
+    return SourceBatchAddResult(added=added, failed=failed)
 
 
 def _split_discord_message(message: str) -> list[str]:
@@ -472,24 +638,25 @@ def _format_watch_created(summary: WatchSummary) -> str:
 
     return "\n".join(
         [
-            f"watch ID: {summary.watch_id}",
-            f"keywords: {', '.join(summary.keywords)}",
-            f"notify time: {summary.notify_time}",
-            f"defaults: {summary.preferred_currency}, {summary.distance_unit}",
+            "**Watch created**",
+            f"`#{summary.watch_id}` {summary.car_query}",
+            f"Keywords: {_comma_list(summary.keywords)}",
+            f"Notify: `{summary.notify_time}`",
+            f"Defaults: `{summary.preferred_currency}` / `{summary.distance_unit}`",
         ]
     )
 
 
-def _format_watch_created_with_source(
+def _format_watch_created_with_sources(
     summary: WatchSummary,
-    source_result: SourceAddResult,
+    source_results: SourceBatchAddResult,
     scrape_result: ScrapeNowResult | None,
 ) -> str:
     """Format one-command watch setup result."""
 
     sections = [
         _format_watch_created(summary),
-        _format_source_added(source_result),
+        _format_sources_added(source_results),
     ]
     if scrape_result is not None:
         sections.append(_format_scrape_now_result(scrape_result))
@@ -511,17 +678,15 @@ def _format_watch_list(summaries: list[WatchSummary]) -> str:
 def _format_watch_block(summary: WatchSummary) -> str:
     """Format one watch summary."""
 
-    exclude_text = ", ".join(summary.exclude_keywords) or "none"
+    exclude_text = _comma_list(summary.exclude_keywords)
     return "\n".join(
         [
-            f"watch_id: {summary.watch_id}",
-            f"car query: {summary.car_query}",
-            f"keywords: {', '.join(summary.keywords)}",
-            f"exclude keywords: {exclude_text}",
-            f"notify time: {summary.notify_time}",
-            f"currency: {summary.preferred_currency}",
-            f"distance unit: {summary.distance_unit}",
-            f"active sources: {summary.active_sources_count}",
+            f"`#{summary.watch_id}` **{summary.car_query}**",
+            f"Keywords: {_comma_list(summary.keywords)}",
+            f"Excluded: {exclude_text}",
+            f"Notify: `{summary.notify_time}`",
+            f"Defaults: `{summary.preferred_currency}` / `{summary.distance_unit}`",
+            f"Sources: `{summary.active_sources_count}`",
         ]
     )
 
@@ -529,18 +694,20 @@ def _format_watch_block(summary: WatchSummary) -> str:
 def _format_scrape_now_result(result: ScrapeNowResult) -> str:
     """Format scrape-now result."""
 
-    warnings = "; ".join(result.warnings) or "none"
-    return "\n".join(
-        [
-            f"watch_id: {result.watch_id}",
-            f"sources seen: {result.sources_seen}",
-            f"sources scraped: {result.sources_scraped}",
-            f"sources skipped: {result.sources_skipped}",
-            f"new listings stored: {result.listings_created}",
-            f"pending listings: {result.pending_listings}",
-            f"warnings: {warnings}",
-        ]
-    )
+    lines = [
+        "**Scrape summary**",
+        (
+            f"`#{result.watch_id}` sources `{result.sources_scraped}/"
+            f"{result.sources_seen}` scraped, skipped `{result.sources_skipped}`"
+        ),
+        (
+            f"New listings: `{result.listings_created}` | "
+            f"Pending: `{result.pending_listings}`"
+        ),
+    ]
+    if result.warnings:
+        lines.append(f"Warnings: {_comma_list(result.warnings)}")
+    return "\n".join(lines)
 
 
 def _format_watch_listings(watch_id: int, listings: list[DigestListing]) -> str:
@@ -571,17 +738,96 @@ def _format_digest_listing(listing: DigestListing) -> str:
     )
 
 
+def _comma_list(values: list[str]) -> str:
+    """Format a readable comma-separated list."""
+
+    return ", ".join(values) if values else "none"
+
+
+def _yes_no(value: bool) -> str:
+    """Format a bool for Discord text."""
+
+    return "yes" if value else "no"
+
+
+def _source_domain(url: str | None) -> str:
+    """Return a compact source domain."""
+
+    if not url:
+        return "no url"
+    host = urlparse(url).netloc.casefold()
+    return host.removeprefix("www.") or "unknown domain"
+
+
+def _format_source_test_summary(result: SourceTestResult) -> str:
+    """Format source-test details in one compact row."""
+
+    return (
+        f"`{result.listings_found}` listings | "
+        f"title {_yes_no(result.title_parsing_worked)} | "
+        f"links {_yes_no(result.link_parsing_worked)} | "
+        f"price {_yes_no(result.price_parsing_worked)} | "
+        f"mileage {_yes_no(result.mileage_parsing_worked)}"
+    )
+
+
+def _format_source_notes(result: SourceTestResult) -> str | None:
+    """Format source-test warnings and errors when useful."""
+
+    notes = [
+        note
+        for note in [*result.warnings, *result.errors]
+        if note not in HIDDEN_SOURCE_NOTES
+    ]
+    if not notes:
+        return None
+    return f"  Notes: {_comma_list(notes)}"
+
+
+def _format_source_added_row(result: SourceAddResult) -> str:
+    """Format one added source as a compact row."""
+
+    lines = [
+        (
+            f"- Added `#{result.source.source_id}` **{result.source.name}** "
+            f"({result.source.kind}, {_source_domain(result.source.base_url)}): "
+            f"{_format_source_test_summary(result.source_test)}"
+        )
+    ]
+    notes = _format_source_notes(result.source_test)
+    if notes is not None:
+        lines.append(notes)
+    return "\n".join(lines)
+
+
+def _format_source_failure_row(url: str, error: str) -> str:
+    """Format one failed source add row."""
+
+    return f"- Not added **{_source_domain(url)}**: {error}"
+
+
 def _format_source_added(result: SourceAddResult) -> str:
     """Format source add response."""
 
-    return "\n".join(
-        [
-            "source added",
-            _format_source_block(result.source),
-            "source test:",
-            _format_source_test(result.source_test),
-        ]
-    )
+    return "\n".join(["**Sources**", _format_source_added_row(result)])
+
+
+def _format_sources_added(result: SourceBatchAddResult) -> str:
+    """Format multi-source add response."""
+
+    if not result.added and not result.failed:
+        return "**Sources**\nNo sources added"
+
+    lines = [
+        "**Sources**",
+        (
+            f"Added `{len(result.added)}` | "
+            f"Not added `{len(result.failed)}`"
+        ),
+    ]
+    lines.extend(_format_source_added_row(source_result) for source_result in result.added)
+    lines.extend(_format_source_failure_row(url, error) for url, error in result.failed)
+    return "\n".join(lines)
 
 
 def _format_source_list(watch_id: int, summaries: list[SourceSummary]) -> str:
@@ -596,10 +842,9 @@ def _format_source_block(summary: SourceSummary) -> str:
 
     return "\n".join(
         [
-            f"source_id: {summary.source_id}",
-            f"name: {summary.name}",
-            f"kind: {summary.kind}",
-            f"url: {summary.base_url or 'none'}",
+            f"`#{summary.source_id}` **{summary.name}**",
+            f"Kind: `{summary.kind}`",
+            f"Domain: {_source_domain(summary.base_url)}",
         ]
     )
 
@@ -607,17 +852,14 @@ def _format_source_block(summary: SourceSummary) -> str:
 def _format_source_test(result: SourceTestResult) -> str:
     """Format source test result."""
 
-    warnings = ", ".join(result.warnings) or "none"
-    errors = ", ".join(result.errors) or "none"
-    return "\n".join(
-        [
-            f"url accepted: {result.url_accepted}",
-            f"listings found: {result.listings_found}",
-            f"title parsing: {result.title_parsing_worked}",
-            f"link parsing: {result.link_parsing_worked}",
-            f"price parsing: {result.price_parsing_worked}",
-            f"mileage parsing: {result.mileage_parsing_worked}",
-            f"warnings: {warnings}",
-            f"errors: {errors}",
-        ]
-    )
+    status = "Accepted" if result.url_accepted else "Diagnostic only"
+    if result.errors:
+        status = "Rejected"
+    lines = [
+        f"**Source test: {status}**",
+        _format_source_test_summary(result),
+    ]
+    notes = _format_source_notes(result)
+    if notes is not None:
+        lines.append(notes.strip())
+    return "\n".join(lines)

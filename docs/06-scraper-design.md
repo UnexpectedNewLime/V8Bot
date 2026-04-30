@@ -4,9 +4,24 @@
 
 MVP scheduled collection uses mock scraping by default. Real website adapters should be added behind stable scraper boundaries so watch, digest, and deduplication services do not need source-specific changes.
 
-Current exception: `AutoTempestScraper` is the first real adapter. It is implemented for manual/local use and fixture-tested parsing, but it is not registered as a default scheduled source. It must use polite `httpx` requests, configured timeout and user agent values, and no anti-bot bypasses.
+Current real adapters are `AutoTempestScraper`, `CarsOnLineScraper`,
+`CorvetteMagazineScraper`, and `VetteFindersScraper`. They are implemented for
+manual/local use and fixture-tested parsing, but sources are only scraped when a
+watch is explicitly attached to a matching source kind. They must use polite
+`httpx` requests, configured timeout and user agent values, and no anti-bot
+bypasses.
 
-Custom source tests are allowed in MVP and may make a single diagnostic fetch with `httpx`, then inspect the response with BeautifulSoup. That behaviour is a source validation tool, not scheduled production scraping.
+Direct Cars.com, Gateway Classic Cars, and Streetside Classics adapters are not
+registered because simple polite HTTP requests currently receive challenge
+responses. Carsales is also not registered because there is no concrete target
+URL yet.
+
+Custom source tests are allowed in MVP and may make a single diagnostic fetch
+with `httpx`, then inspect the response with BeautifulSoup. That behaviour is a
+source validation tool, not scheduled production scraping. Unsupported domains
+should report that no scheduled adapter is registered, then include lightweight
+diagnostics such as page title, link count, and sampled links from the polite
+fetch.
 
 Facebook Marketplace is explicitly out of scope for v1 and should be rejected by source validation.
 
