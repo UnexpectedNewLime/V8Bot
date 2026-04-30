@@ -424,5 +424,3 @@ Start with:
 ## TODO
 - Add carsales scraping after a concrete target URL and permission posture are
   decided.
-- Move all messages to post in a thread to avoid spam
-- Have different watches on different threads
