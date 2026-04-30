@@ -8,8 +8,9 @@ from discord import app_commands
 
 from car_watch_bot.bot.commands import register_commands
 from car_watch_bot.bot.embeds import build_listing_embed
+from car_watch_bot.bot.watch_threads import resolve_watch_thread, send_to_watch_thread
 from car_watch_bot.config import Settings
-from car_watch_bot.core.models import DigestListing, DigestPayload
+from car_watch_bot.core.models import DigestListing, DigestPayload, WatchDeliveryTarget
 from car_watch_bot.services.listing_service import ListingService
 from car_watch_bot.services.source_service import SourceService
 from car_watch_bot.services.watch_service import WatchService
@@ -114,28 +115,26 @@ class DiscordDigestSender:
     def __init__(self, client: discord.Client) -> None:
         self.client = client
 
-    async def send_digest(self, channel_id: str, digest: DigestPayload) -> None:
-        """Send one digest payload to a Discord channel."""
+    async def send_digest(
+        self,
+        target: WatchDeliveryTarget,
+        digest: DigestPayload,
+    ) -> str | None:
+        """Send one digest payload to a watch thread."""
 
-        channel = await self._sendable_channel(channel_id)
+        thread = await resolve_watch_thread(self.client, target)
         for embed in _build_digest_embeds(digest):
-            await channel.send(embed=embed)
+            await thread.send(embed=embed, silent=True)
+        return str(thread.id)
 
-    async def send_no_updates(self, channel_id: str, watch_name: str) -> None:
-        """Send a no-update digest confirmation."""
+    async def send_no_updates(self, target: WatchDeliveryTarget) -> str | None:
+        """Send a no-update digest confirmation to a watch thread."""
 
-        channel = await self._sendable_channel(channel_id)
-        await channel.send(f"{watch_name}: scheduled check complete, no new listings.")
-
-    async def _sendable_channel(self, channel_id: str) -> object:
-        """Return a Discord channel that can receive messages."""
-
-        channel = self.client.get_channel(int(channel_id))
-        if channel is None:
-            channel = await self.client.fetch_channel(int(channel_id))
-        if not hasattr(channel, "send"):
-            raise RuntimeError("configured digest channel cannot receive messages")
-        return channel
+        return await send_to_watch_thread(
+            self.client,
+            target,
+            content=f"{target.watch_name}: scheduled check complete, no new listings.",
+        )
 
 
 def _build_digest_embeds(digest: DigestPayload) -> list[discord.Embed]:

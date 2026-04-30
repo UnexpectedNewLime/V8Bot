@@ -48,6 +48,26 @@ def test_watch_service_create_watch_uses_defaults(db_session_factory) -> None:
     assert summary.distance_unit == "km"
 
 
+def test_watch_service_delivery_target_and_thread_update(db_session_factory) -> None:
+    service = WatchService(db_session_factory)
+    summary = service.create_watch(
+        discord_user_id="123",
+        car_query="C5 Corvette",
+        keywords="manual, HUD",
+        exclude_keywords="",
+        notify_time="09:30",
+        channel_id="999",
+    )
+
+    target = service.get_delivery_target("123", summary.watch_id)
+    updated_target = service.set_thread_id("123", summary.watch_id, "555")
+
+    assert target.channel_id == "999"
+    assert target.thread_id is None
+    assert updated_target.thread_id == "555"
+    assert service.get_delivery_target("123", summary.watch_id).thread_id == "555"
+
+
 def test_watch_service_list_watches(db_session_factory) -> None:
     service = WatchService(db_session_factory)
     service.create_watch(
