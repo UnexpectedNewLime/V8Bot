@@ -9,8 +9,12 @@ messages to Discord.
 
 Current source status:
 
-- AutoTempest is the first real source adapter.
-- Other sources remain mock-first until deliberately implemented.
+- AutoTempest supports static/queue result scraping.
+- Cars On Line, Corvette Magazine classifieds, and VetteFinders support static
+  HTML scraping.
+- Cars.com, Gateway Classic Cars, and Streetside Classics are not registered
+  because simple polite HTTP requests currently receive challenge responses.
+- Carsales still needs a concrete target URL before implementation.
 - Facebook Marketplace is not supported in the MVP.
 
 ## Getting Started For Development
@@ -133,9 +137,13 @@ keywords: manual, targa, hud
 exclude_keywords: automatic, convertible
 notify_time: 22:08
 source_url: https://www.autotempest.com/results?localization=any&make=chevrolet&maxyear=2001&minyear=2001&model=corvette&transmission=man&zip=90210
-source_name: AutoTempest
 scrape_now: True
 ```
+
+`source_name` is optional. If omitted, the bot derives a name from the domain.
+`source_url` may contain multiple URLs separated by spaces, commas, or new
+lines. Pasted Markdown links are also accepted. Generated names are made unique
+per user, such as `cars-on-line` and `cars-on-line 2`.
 
 Expected result:
 
@@ -152,6 +160,9 @@ You can also run the flow manually:
 /watch_scrape_now
 /watch_listings
 ```
+
+`/watch_source_add` accepts one or more URLs in its `url` field. The optional
+`name` field can only be used with a single URL.
 
 ## Local Scrape Flow Without Discord
 
@@ -411,22 +422,7 @@ Start with:
 - `docs/09-engineering-principles.md`
 
 ## TODO
-- Add more sources (currently only Autotempest), Biggest win would be carsales scraping here
-     - Streetside Classics:
-     `https://www.streetsideclassics.com/vehicles?q%5Bmake_eq%5D=Chevrolet&q%5Bmodel_eq%5D=Corvette&q%5Btransmission_type_cont%5D=manual&q%5Byear_gteq%5D=2000&q%5Byear_lteq%5D=2001`
-   - Cars On Line 2000:
-     `https://cars-on-line.com/search-results/?_sft_job_listing_category=corvettes-for-sale&_sfm__job_listing_year=2000`
-   - Cars On Line 2001:
-     `https://cars-on-line.com/search-results/?_sft_job_listing_category=corvettes-for-sale&_sfm__job_listing_year=2001`
-   - VetteFinders:
-     `https://www.vettefinders.com/index.cfm/fuseaction/corvette.SummaryView/Gen/5`
-   - Cars.com:
-     `https://www.cars.com/shopping/results/?year_min=2000&year_max=2001&makes%5B%5D=chevrolet&models%5B%5D=chevrolet-corvette&transmission_slugs%5B%5D=manual&zip=60606&maximum_distance=9999&sort=year_desc`
-   - Corvette Magazine classifieds:
-     `https://www.corvette-mag.com/classifieds?from_year=2000&order=desc&page=1&search=&show%5B%5D=dealer&show%5B%5D=owner&show%5B%5D=used&sort=approved_at&to_year=2001`
-   - Gateway Classic Cars broad query:
-     `https://www.gatewayclassiccars.com/vehicles/filters/chevrolet/corvette?q_year_gteq=2000&q_year_lteq=2001`
-   - Gateway Classic Cars manual query:
-     `https://www.gatewayclassiccars.com/vehicles/filters/chevrolet/corvette?q_transmission_type_cont=manual&q_year_gteq=2000&q_year_lteq=2001`
+- Add carsales scraping after a concrete target URL and permission posture are
+  decided.
 - Move all messages to post in a thread to avoid spam
 - Have different watches on different threads

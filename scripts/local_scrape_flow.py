@@ -17,8 +17,8 @@ from car_watch_bot.db.database import (  # noqa: E402
     create_session_factory,
     init_database,
 )
-from car_watch_bot.scrapers.autotempest import AutoTempestScraper  # noqa: E402
-from car_watch_bot.scrapers.mock import MockScraper  # noqa: E402
+from car_watch_bot.main import _scraper_adapters  # noqa: E402
+from car_watch_bot.scrapers.diagnostic import DiagnosticScraper  # noqa: E402
 from car_watch_bot.services.listing_service import ListingService  # noqa: E402
 from car_watch_bot.services.source_service import SourceService  # noqa: E402
 from car_watch_bot.services.watch_service import WatchService  # noqa: E402
@@ -51,14 +51,7 @@ async def main() -> None:
     engine = create_database_engine(settings.database_url)
     init_database(engine)
     session_factory = create_session_factory(engine)
-    adapters = {
-        "mock": MockScraper(),
-        "autotempest": AutoTempestScraper(
-            user_agent=settings.scraper_user_agent,
-            timeout_seconds=settings.scraper_timeout_seconds,
-            min_interval_seconds=settings.scraper_min_interval_seconds,
-        ),
-    }
+    adapters = _scraper_adapters(settings)
     watch_service = WatchService(
         session_factory=session_factory,
         default_timezone=settings.default_timezone,
@@ -68,6 +61,12 @@ async def main() -> None:
     source_service = SourceService(
         session_factory=session_factory,
         source_test_scrapers=adapters,
+        source_diagnostic_scraper=DiagnosticScraper(
+            user_agent=settings.scraper_user_agent,
+            timeout_seconds=settings.scraper_timeout_seconds,
+            min_interval_seconds=settings.scraper_min_interval_seconds,
+        ),
+        allow_unregistered_sources=False,
     )
     listing_service = ListingService(
         session_factory=session_factory,
