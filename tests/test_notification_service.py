@@ -5,7 +5,8 @@ from datetime import datetime, time
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from car_watch_bot.core.models import DigestPayload
+from car_watch_bot.core.models import DigestPayload, WatchDeliveryTarget
+from car_watch_bot.db.models import Watch
 from car_watch_bot.db.repositories import (
     ListingRepository,
     ScrapeAttemptRepository,
@@ -22,18 +23,25 @@ class FakeDigestSender:
     """Digest sender test double."""
 
     def __init__(self) -> None:
-        self.sent_digests: list[tuple[str, DigestPayload]] = []
-        self.no_update_messages: list[tuple[str, str]] = []
+        self.sent_digests: list[tuple[WatchDeliveryTarget, DigestPayload]] = []
+        self.no_update_messages: list[WatchDeliveryTarget] = []
+        self.resolved_thread_id: str | None = "thread-123"
 
-    async def send_digest(self, channel_id: str, digest: DigestPayload) -> None:
+    async def send_digest(
+        self,
+        target: WatchDeliveryTarget,
+        digest: DigestPayload,
+    ) -> str | None:
         """Record a sent digest."""
 
-        self.sent_digests.append((channel_id, digest))
+        self.sent_digests.append((target, digest))
+        return self.resolved_thread_id
 
-    async def send_no_updates(self, channel_id: str, watch_name: str) -> None:
+    async def send_no_updates(self, target: WatchDeliveryTarget) -> str | None:
         """Record a no-update message."""
 
-        self.no_update_messages.append((channel_id, watch_name))
+        self.no_update_messages.append(target)
+        return self.resolved_thread_id
 
 
 def _seed_due_watch_with_listings(db_session_factory) -> int:
@@ -77,7 +85,8 @@ def test_due_digest_sends_and_marks_listings_notified(db_session_factory) -> Non
         pending = ListingRepository(session).list_unnotified_for_watch(watch_id)
     assert sent_count == 1
     assert len(sender.sent_digests) == 1
-    assert sender.sent_digests[0][0] == "999"
+    assert sender.sent_digests[0][0].channel_id == "999"
+    assert sender.sent_digests[0][0].thread_id is None
     assert sender.sent_digests[0][1].listing_count == 3
     assert pending == []
 
@@ -120,5 +129,21 @@ def test_empty_due_digest_sends_no_update_message(db_session_factory) -> None:
 
     assert sent_count == 1
     assert sender.sent_digests == []
-    assert sender.no_update_messages == [("999", "Empty digest")]
+    assert len(sender.no_update_messages) == 1
+    assert sender.no_update_messages[0].channel_id == "999"
+    assert sender.no_update_messages[0].watch_name == "Empty digest"
     assert last_sent is not None
+
+
+def test_due_digest_persists_resolved_thread_id(db_session_factory) -> None:
+    watch_id = _seed_due_watch_with_listings(db_session_factory)
+    sender = FakeDigestSender()
+    service = NotificationService(db_session_factory, sender)
+    now = datetime(2026, 4, 28, 9, 30, tzinfo=ZoneInfo("Australia/Sydney"))
+
+    asyncio.run(service.send_due_digests(now))
+
+    with db_session_factory() as session:
+        watch = session.get(Watch, watch_id)
+        assert watch is not None
+        assert watch.thread_id == "thread-123"

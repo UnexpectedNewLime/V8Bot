@@ -134,6 +134,16 @@ class WatchRepository:
         watch.deactivated_at = datetime.utcnow()
         self.session.flush()
 
+    def set_thread_id(self, watch_id: int, thread_id: str | None) -> Watch | None:
+        """Persist the Discord thread id associated with a watch."""
+
+        watch = self.session.get(Watch, watch_id)
+        if watch is None:
+            return None
+        watch.thread_id = thread_id
+        self.session.flush()
+        return watch
+
 
 class SourceRepository:
     """Persistence operations for sources and watch-source links."""

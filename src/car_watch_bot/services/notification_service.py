@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from car_watch_bot.core.models import DigestPayload
+from car_watch_bot.core.models import DigestPayload, WatchDeliveryTarget
 from car_watch_bot.db.models import Watch
 from car_watch_bot.db.repositories import ListingRepository, WatchRepository
 from car_watch_bot.services.digest_service import DigestService
@@ -19,11 +19,15 @@ logger = logging.getLogger(__name__)
 class DigestSender(Protocol):
     """Interface for sending digest payloads."""
 
-    async def send_digest(self, channel_id: str, digest: DigestPayload) -> None:
-        """Send one digest payload."""
+    async def send_digest(
+        self,
+        target: WatchDeliveryTarget,
+        digest: DigestPayload,
+    ) -> str | None:
+        """Send one digest payload and return the resolved thread id."""
 
-    async def send_no_updates(self, channel_id: str, watch_name: str) -> None:
-        """Send a no-update digest confirmation."""
+    async def send_no_updates(self, target: WatchDeliveryTarget) -> str | None:
+        """Send a no-update digest confirmation and return the resolved thread id."""
 
 
 class NotificationService:
@@ -54,18 +58,18 @@ class NotificationService:
                     logger.warning("watch has no digest channel", extra={"watch_id": watch.id})
                     continue
 
+                target = _delivery_target(watch)
                 digest_service = DigestService(ListingRepository(session))
                 digest = digest_service.build_digest(watch)
                 if digest is None:
-                    await self.digest_sender.send_no_updates(
-                        watch.channel_id,
-                        watch.name,
-                    )
+                    thread_id = await self.digest_sender.send_no_updates(target)
+                    watch.thread_id = thread_id or watch.thread_id
                     watch.last_digest_sent_at = current_time.astimezone(timezone.utc)
                     sent_count += 1
                     continue
 
-                await self.digest_sender.send_digest(watch.channel_id, digest)
+                thread_id = await self.digest_sender.send_digest(target, digest)
+                watch.thread_id = thread_id or watch.thread_id
                 digest_service.mark_digest_sent(
                     watch_id=watch.id,
                     listing_ids=[listing.listing_id for listing in digest.listings],
@@ -100,3 +104,18 @@ class NotificationService:
             and local_last_sent.hour == local_time.hour
             and local_last_sent.minute == local_time.minute
         )
+
+
+def _delivery_target(watch: Watch) -> WatchDeliveryTarget:
+    """Create interface-neutral delivery target details for a scheduled watch."""
+
+    if watch.channel_id is None:
+        raise ValueError("watch channel_id is required")
+    return WatchDeliveryTarget(
+        watch_id=watch.id,
+        watch_name=watch.name,
+        watch_query=watch.query,
+        included_keywords=list(watch.included_keywords),
+        channel_id=watch.channel_id,
+        thread_id=watch.thread_id,
+    )

@@ -7,6 +7,7 @@ import discord
 from discord import app_commands
 
 from car_watch_bot.bot.embeds import build_listing_embed
+from car_watch_bot.bot.watch_threads import resolve_watch_thread
 from car_watch_bot.core.models import DigestListing, ScrapeNowResult, SourceTestResult
 from car_watch_bot.services.listing_service import ListingService
 from car_watch_bot.services.source_service import (
@@ -85,6 +86,8 @@ def register_commands(
                 )
                 await _send_public_listing_embeds(
                     interaction,
+                    watch_service,
+                    str(interaction.user.id),
                     summary.watch_id,
                     listings,
                     heading=f"{summary.car_query}: {len(listings)} new listings",
@@ -129,6 +132,8 @@ def register_commands(
             )
             await _send_public_listing_embeds(
                 interaction,
+                watch_service,
+                str(interaction.user.id),
                 watch_id,
                 listings,
                 heading=f"Watch {watch_id}: {len(listings)} new listings",
@@ -156,6 +161,8 @@ def register_commands(
                 return f"watch {watch_id} has no pending listings"
             await _send_public_listing_embeds(
                 interaction,
+                watch_service,
+                str(interaction.user.id),
                 watch_id,
                 listings,
                 heading=f"Watch {watch_id}: {len(listings)} pending listings",
@@ -389,27 +396,34 @@ async def _send_ephemeral_message(
 
 async def _send_public_listing_embeds(
     interaction: discord.Interaction,
+    watch_service: WatchService,
+    discord_user_id: str,
     watch_id: int,
     listings: list[DigestListing],
     heading: str,
     empty_message: str | None = None,
 ) -> None:
-    """Send each listing as its own public channel message."""
+    """Send each listing as its own public message in the watch thread."""
 
-    channel = interaction.channel
-    if channel is None or not hasattr(channel, "send"):
-        raise RuntimeError("interaction channel cannot receive messages")
+    target = watch_service.get_delivery_target(discord_user_id, watch_id)
+    thread = await resolve_watch_thread(interaction.client, target)
+    resolved_thread_id = str(thread.id)
     if not listings:
         if empty_message:
-            await channel.send(empty_message)
+            await thread.send(content=empty_message, silent=True)
+            if resolved_thread_id != target.thread_id:
+                watch_service.set_thread_id(discord_user_id, watch_id, resolved_thread_id)
         return
+    if resolved_thread_id != target.thread_id:
+        watch_service.set_thread_id(discord_user_id, watch_id, resolved_thread_id)
     for listing in listings:
-        await channel.send(
+        await thread.send(
             embed=build_listing_embed(
                 listing=listing,
                 heading=heading,
-                query=f"watch_id: {watch_id}",
-            )
+                query=target.watch_query,
+            ),
+            silent=True,
         )
 
 

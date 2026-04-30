@@ -87,6 +87,18 @@ class DigestPayload:
 
 
 @dataclass(frozen=True)
+class WatchDeliveryTarget:
+    """Interface-neutral destination details for watch-specific messages."""
+
+    watch_id: int
+    watch_name: str
+    watch_query: str
+    included_keywords: list[str]
+    channel_id: str
+    thread_id: str | None
+
+
+@dataclass(frozen=True)
 class ScrapeNowResult:
     """Result of a user-triggered scrape."""
 

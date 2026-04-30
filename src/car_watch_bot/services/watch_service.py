@@ -5,6 +5,7 @@ from datetime import time
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from car_watch_bot.core.models import WatchDeliveryTarget
 from car_watch_bot.db.models import Watch
 from car_watch_bot.db.repositories import SourceRepository, UserRepository, WatchRepository
 
@@ -263,6 +264,38 @@ class WatchService:
             SourceRepository(session).add_source_to_watch(watch.id, source_id)
             session.commit()
 
+    def get_delivery_target(
+        self,
+        discord_user_id: str,
+        watch_id: int,
+    ) -> WatchDeliveryTarget:
+        """Return watch-specific delivery details for an owned active watch."""
+
+        with self.session_factory() as session:
+            watch = self._get_owned_watch(session, discord_user_id, watch_id)
+            target = self._delivery_target(watch)
+            session.commit()
+            return target
+
+    def set_thread_id(
+        self,
+        discord_user_id: str,
+        watch_id: int,
+        thread_id: str | None,
+    ) -> WatchDeliveryTarget:
+        """Persist a Discord thread id for an owned active watch."""
+
+        with self.session_factory() as session:
+            user = UserRepository(session).get_or_create_by_discord_id(discord_user_id)
+            watch_repository = WatchRepository(session)
+            watch = watch_repository.get_active_for_user(watch_id, user.id)
+            if watch is None:
+                raise WatchNotFoundError("watch not found")
+            watch_repository.set_thread_id(watch.id, thread_id)
+            target = self._delivery_target(watch)
+            session.commit()
+            return target
+
     def _get_owned_watch(
         self,
         session: Session,
@@ -276,6 +309,20 @@ class WatchService:
         if watch is None:
             raise WatchNotFoundError("watch not found")
         return watch
+
+    def _delivery_target(self, watch: Watch) -> WatchDeliveryTarget:
+        """Create interface-neutral watch delivery details."""
+
+        if watch.channel_id is None:
+            raise WatchValidationError("watch has no delivery channel")
+        return WatchDeliveryTarget(
+            watch_id=watch.id,
+            watch_name=watch.name,
+            watch_query=watch.query,
+            included_keywords=list(watch.included_keywords),
+            channel_id=watch.channel_id,
+            thread_id=watch.thread_id,
+        )
 
     def _watch_summary(self, watch: Watch, active_sources_count: int) -> WatchSummary:
         """Create an interface-safe watch summary."""

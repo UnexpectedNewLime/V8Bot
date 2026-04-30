@@ -2,13 +2,39 @@
 
 from decimal import Decimal
 
+from sqlalchemy import text
+
 from car_watch_bot.core.models import ListingCandidate, ScoreResult
+from car_watch_bot.db.database import create_database_engine, init_database
 from car_watch_bot.db.repositories import (
     ListingRepository,
     SourceRepository,
     UserRepository,
     WatchRepository,
 )
+
+
+def test_init_database_adds_thread_id_to_existing_watch_table() -> None:
+    engine = create_database_engine("sqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE watches ("
+                "id INTEGER PRIMARY KEY, "
+                "user_id INTEGER NOT NULL, "
+                "name VARCHAR(120) NOT NULL"
+                ")"
+            )
+        )
+
+    init_database(engine)
+
+    with engine.connect() as connection:
+        columns = {
+            row[1]
+            for row in connection.execute(text("PRAGMA table_info(watches)")).fetchall()
+        }
+    assert "thread_id" in columns
 
 
 def test_user_creation_is_idempotent(db_session) -> None:
@@ -32,6 +58,23 @@ def test_watch_creation_and_active_listing(db_session) -> None:
     )
 
     assert watch in watches.list_active_for_user(user.id)
+
+
+def test_watch_thread_id_can_be_persisted(db_session) -> None:
+    user = UserRepository(db_session).get_or_create_by_discord_id("123")
+    watches = WatchRepository(db_session)
+    watch = watches.create_watch(
+        user_id=user.id,
+        name="C5 watch",
+        query="C5 Corvette",
+        included_keywords=["manual"],
+    )
+
+    updated_watch = watches.set_thread_id(watch.id, "555")
+
+    assert updated_watch is not None
+    assert updated_watch.thread_id == "555"
+    assert watches.list_active_for_user(user.id)[0].thread_id == "555"
 
 
 def test_source_creation_and_watch_assignment(db_session) -> None:
