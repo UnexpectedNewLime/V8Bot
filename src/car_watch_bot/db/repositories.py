@@ -51,6 +51,8 @@ def _listing_raw_payload_for_insert(listing: ListingCandidate) -> dict[str, Any]
 def _listing_raw_payload_for_update(
     db_listing: "Listing",
     listing: ListingCandidate,
+    old_price_amount: Decimal | None,
+    old_price_currency: str | None,
 ) -> dict[str, Any]:
     """Return refreshed scraper metadata preserving known price history."""
 
@@ -72,13 +74,13 @@ def _listing_raw_payload_for_update(
             raw_payload,
             FIRST_SEEN_PRICE_AMOUNT_KEY,
             FIRST_SEEN_PRICE_CURRENCY_KEY,
-            db_listing.price_amount,
-            db_listing.price_currency,
+            old_price_amount,
+            old_price_currency,
         )
 
     if _price_changed(
-        db_listing.price_amount,
-        db_listing.price_currency,
+        old_price_amount,
+        old_price_currency,
         listing.price_amount,
         listing.price_currency,
     ):
@@ -86,8 +88,8 @@ def _listing_raw_payload_for_update(
             raw_payload,
             PREVIOUS_PRICE_AMOUNT_KEY,
             PREVIOUS_PRICE_CURRENCY_KEY,
-            db_listing.price_amount,
-            db_listing.price_currency,
+            old_price_amount,
+            old_price_currency,
         )
         raw_payload[PRICE_CHANGED_AT_KEY] = (
             datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
@@ -574,7 +576,8 @@ class ListingRepository:
     ) -> None:
         """Refresh fields that can change between scrape attempts."""
 
-        updated_raw_payload = _listing_raw_payload_for_update(db_listing, listing)
+        old_price_amount = db_listing.price_amount
+        old_price_currency = db_listing.price_currency
 
         db_listing.external_id = listing.external_id
         db_listing.title = listing.title
@@ -591,7 +594,12 @@ class ListingRepository:
         db_listing.score = score_result.score
         db_listing.score_reasons = score_result.reasons
         db_listing.content_hash = _content_hash(listing.title, listing.url)
-        db_listing.raw_payload = updated_raw_payload
+        db_listing.raw_payload = _listing_raw_payload_for_update(
+            db_listing,
+            listing,
+            old_price_amount,
+            old_price_currency,
+        )
         db_listing.last_seen_at = datetime.utcnow()
 
     def mark_listings_as_notified(self, watch_id: int, listing_ids: list[int]) -> None:
