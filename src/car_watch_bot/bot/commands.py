@@ -21,9 +21,12 @@ from car_watch_bot.services.source_service import (
     SourceValidationError,
 )
 from car_watch_bot.services.watch_service import (
+    WatchDetails,
     WatchNotFoundError,
     WatchService,
     WatchSummary,
+    WatchUpdateRequest,
+    WatchUpdateResult,
     WatchValidationError,
 )
 
@@ -340,6 +343,82 @@ def register_commands(
             return _format_watch_list(summaries)
 
         await _send_ephemeral_result(interaction, action, "failed to list watches")
+
+    @command_tree.command(name="watch_show", description="Show one watch in detail.")
+    @app_commands.autocomplete(watch_id=watch_id_autocomplete)
+    async def watch_show(interaction: discord.Interaction, watch_id: int) -> None:
+        async def action() -> str:
+            details = watch_service.get_watch_details(str(interaction.user.id), watch_id)
+            return _format_watch_details(details)
+
+        await _send_ephemeral_result(interaction, action, "failed to show watch")
+
+    @command_tree.command(name="watch_edit", description="Edit one of your watches.")
+    @app_commands.autocomplete(watch_id=watch_id_autocomplete)
+    async def watch_edit(
+        interaction: discord.Interaction,
+        watch_id: int,
+        car_query: str = "",
+        watch_name: str = "",
+        keywords: str = "",
+        exclude_keywords: str = "",
+        clear_exclusions: bool = False,
+        notify_time: str = "",
+        timezone: str = "",
+        currency: str = "",
+        distance_unit: str = "",
+        channel_id: str = "",
+        thread_id: str = "",
+        clear_channel: bool = False,
+        clear_thread: bool = False,
+        use_current_channel: bool = False,
+        active: bool | None = None,
+    ) -> None:
+        async def action() -> str:
+            if use_current_channel and channel_id.strip():
+                raise WatchValidationError(
+                    "channel_id cannot be set when use_current_channel is true"
+                )
+            current_channel_id = (
+                str(interaction.channel_id)
+                if use_current_channel and interaction.channel_id
+                else None
+            )
+            current_guild_id = (
+                str(interaction.guild_id)
+                if use_current_channel and interaction.guild_id
+                else None
+            )
+            result = watch_service.update_watch(
+                str(interaction.user.id),
+                watch_id,
+                WatchUpdateRequest(
+                    name=_optional_command_text(watch_name),
+                    car_query=_optional_command_text(car_query),
+                    keywords=_optional_command_text(keywords),
+                    exclude_keywords=_optional_command_text(exclude_keywords),
+                    clear_exclusions=clear_exclusions,
+                    notify_time=_optional_command_text(notify_time),
+                    timezone=_optional_command_text(timezone),
+                    currency=_optional_command_text(currency),
+                    distance_unit=_optional_command_text(distance_unit),
+                    guild_id=current_guild_id,
+                    channel_id=current_channel_id or _optional_command_text(channel_id),
+                    thread_id=_optional_command_text(thread_id),
+                    clear_channel=clear_channel,
+                    clear_thread=clear_thread,
+                    is_active=active,
+                ),
+            )
+            logger.info(
+                "watch_edit completed watch_id=%s user_id=%s changed_fields=%s",
+                watch_id,
+                interaction.user.id,
+                ",".join(result.changed_fields) or "none",
+            )
+            return _format_watch_edit_result(result)
+
+        await _send_ephemeral_result(interaction, action, "failed to edit watch")
 
     @command_tree.command(name="watch_scrape_now", description="Scrape one watch now.")
     @app_commands.autocomplete(watch_id=watch_id_autocomplete)
@@ -1083,6 +1162,69 @@ def _format_watch_list(summaries: list[WatchSummary]) -> str:
     return "\n\n".join(_format_watch_block(summary) for summary in summaries)
 
 
+def _format_watch_details(details: WatchDetails) -> str:
+    """Format detailed watch configuration."""
+
+    lines = [
+        "**Watch details**",
+        f"`#{details.watch_id}` **{details.name}**",
+        f"Active: `{_yes_no(details.is_active)}`",
+        f"Car query: {details.car_query}",
+        f"Keywords: {_comma_list(details.keywords)}",
+        f"Excluded: {_comma_list(details.exclude_keywords)}",
+        f"Notify: `{details.notify_time}` `{details.timezone}`",
+        f"Defaults: `{details.preferred_currency}` / `{details.distance_unit}`",
+        (
+            "Delivery: "
+            f"guild `{_optional_id(details.guild_id)}` | "
+            f"channel `{_optional_id(details.channel_id)}` | "
+            f"thread `{_optional_id(details.thread_id)}`"
+        ),
+        f"Criteria version: `{details.criteria_version}`",
+        (
+            f"Sources: `{details.active_sources_count}` active / "
+            f"`{len(details.sources)}` total"
+        ),
+    ]
+    source_lines = _format_watch_source_details(details)
+    if source_lines:
+        lines.extend(source_lines)
+    return "\n".join(lines)
+
+
+def _format_watch_edit_result(result: WatchUpdateResult) -> str:
+    """Format the result of a consolidated watch edit."""
+
+    if result.changed_fields:
+        heading = "**Watch updated**"
+        changes = f"Changed: `{', '.join(result.changed_fields)}`"
+    else:
+        heading = "**Watch unchanged**"
+        changes = "No editable fields changed."
+    return "\n".join([heading, changes, _format_watch_details(result.details)])
+
+
+def _format_watch_source_details(details: WatchDetails) -> list[str]:
+    """Format source rows for watch details."""
+
+    if not details.sources:
+        return ["Sources detail: none"]
+    lines = ["Sources detail:"]
+    for source in details.sources[:10]:
+        state = "enabled" if source.is_enabled else "disabled"
+        if not source.is_active:
+            state = f"{state}, inactive"
+        lines.append(
+            (
+                f"- `#{source.source_id}` **{source.name}** "
+                f"(`{source.kind}`, {_source_domain(source.base_url)}, {state})"
+            )
+        )
+    if len(details.sources) > 10:
+        lines.append(f"...and {len(details.sources) - 10} more")
+    return lines
+
+
 def _format_watch_block(summary: WatchSummary) -> str:
     """Format one watch summary."""
 
@@ -1156,6 +1298,19 @@ def _yes_no(value: bool) -> str:
     """Format a bool for Discord text."""
 
     return "yes" if value else "no"
+
+
+def _optional_id(value: str | None) -> str:
+    """Format an optional Discord id."""
+
+    return value or "none"
+
+
+def _optional_command_text(value: str) -> str | None:
+    """Convert optional Discord command text to a service-layer optional."""
+
+    normalized_value = value.strip()
+    return normalized_value or None
 
 
 def _source_domain(url: str | None) -> str:

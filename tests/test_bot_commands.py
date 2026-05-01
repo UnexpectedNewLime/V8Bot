@@ -8,6 +8,8 @@ import pytest
 from car_watch_bot.bot.commands import (
     SourceBatchAddResult,
     _format_sources_added,
+    _format_watch_details,
+    _format_watch_edit_result,
     _parse_source_urls,
     _source_id_autocomplete_choices,
     _source_remove_options,
@@ -22,7 +24,12 @@ from car_watch_bot.services.source_service import (
     SourceSummary,
     SourceValidationError,
 )
-from car_watch_bot.services.watch_service import WatchService
+from car_watch_bot.services.watch_service import (
+    WatchDetails,
+    WatchService,
+    WatchSourceDetails,
+    WatchUpdateResult,
+)
 
 
 def _interaction(user_id: str = "123", watch_id: int | None = None) -> SimpleNamespace:
@@ -358,3 +365,78 @@ def test_sources_added_summary_hides_low_signal_facebook_warning() -> None:
     assert "autotempest" in message
     assert "Facebook" not in message
     assert "Notes:" not in message
+
+
+def test_watch_details_summary_includes_full_surface_and_sources() -> None:
+    details = WatchDetails(
+        watch_id=7,
+        name="C5 Z06 hunt",
+        car_query="C5 Corvette Z06",
+        keywords=["manual", "z06"],
+        exclude_keywords=["automatic"],
+        notify_time="21:45",
+        timezone="Australia/Sydney",
+        preferred_currency="AUD",
+        distance_unit="km",
+        guild_id="111",
+        channel_id="222",
+        thread_id=None,
+        criteria_version=3,
+        is_active=True,
+        active_sources_count=1,
+        sources=[
+            WatchSourceDetails(
+                source_id=9,
+                name="AutoTempest",
+                kind="autotempest",
+                base_url="https://www.autotempest.com/results?make=chevrolet",
+                is_enabled=True,
+                is_active=True,
+            )
+        ],
+    )
+
+    message = _format_watch_details(details)
+
+    assert "**Watch details**" in message
+    assert "`#7` **C5 Z06 hunt**" in message
+    assert "Car query: C5 Corvette Z06" in message
+    assert "Keywords: manual, z06" in message
+    assert "Excluded: automatic" in message
+    assert "Notify: `21:45` `Australia/Sydney`" in message
+    assert "Delivery: guild `111` | channel `222` | thread `none`" in message
+    assert "Sources: `1` active / `1` total" in message
+    assert "`#9` **AutoTempest** (`autotempest`, autotempest.com, enabled)" in message
+
+
+def test_watch_edit_result_distinguishes_changed_and_unchanged() -> None:
+    details = WatchDetails(
+        watch_id=7,
+        name="C5 Z06 hunt",
+        car_query="C5 Corvette Z06",
+        keywords=["manual", "z06"],
+        exclude_keywords=[],
+        notify_time="21:45",
+        timezone="UTC",
+        preferred_currency="USD",
+        distance_unit="mi",
+        guild_id=None,
+        channel_id=None,
+        thread_id=None,
+        criteria_version=2,
+        is_active=False,
+        active_sources_count=0,
+        sources=[],
+    )
+
+    updated_message = _format_watch_edit_result(
+        WatchUpdateResult(details=details, changed_fields=["watch_name", "active"])
+    )
+    unchanged_message = _format_watch_edit_result(
+        WatchUpdateResult(details=details, changed_fields=[])
+    )
+
+    assert "**Watch updated**" in updated_message
+    assert "Changed: `watch_name, active`" in updated_message
+    assert "**Watch unchanged**" in unchanged_message
+    assert "No editable fields changed." in unchanged_message
