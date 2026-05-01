@@ -119,6 +119,7 @@ The current Discord interface registers:
 - `/watch_source_add`
 - `/watch_source_list`
 - `/watch_source_remove`
+- `/watch_source_remove_menu`
 - `/watch_source_test`
 - `/watch_scrape_now`
 - `/watch_listings`
@@ -160,6 +161,11 @@ You can also run the flow manually:
 /watch_scrape_now
 /watch_listings
 ```
+
+Commands that accept a `watch_id` offer Discord autocomplete scoped to your
+active watches. `/watch_source_remove` also autocompletes `source_id` after a
+watch is selected, and `/watch_source_remove_menu` lets you remove a source from
+an ephemeral select menu.
 
 `/watch_source_add` accepts one or more URLs in its `url` field. The optional
 `name` field can only be used with a single URL.
