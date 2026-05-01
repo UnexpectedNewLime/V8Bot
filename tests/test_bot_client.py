@@ -29,13 +29,46 @@ def test_create_bot_client_registers_expected_commands(db_session_factory) -> No
         "watch_exclude_remove",
         "watch_keyword_add",
         "watch_keyword_remove",
+        "watch_edit",
         "watch_list",
         "watch_notify_time",
         "watch_remove",
         "watch_scrape_now",
+        "watch_show",
         "watch_listings",
         "watch_source_add",
         "watch_source_list",
         "watch_source_remove",
+        "watch_source_remove_menu",
         "watch_source_test",
     }
+
+    commands_by_name = {
+        command.name: command for command in client.command_tree.get_commands()
+    }
+    watch_id_commands = {
+        "watch_currency",
+        "watch_distance_unit",
+        "watch_exclude_add",
+        "watch_exclude_remove",
+        "watch_edit",
+        "watch_keyword_add",
+        "watch_keyword_remove",
+        "watch_listings",
+        "watch_notify_time",
+        "watch_remove",
+        "watch_scrape_now",
+        "watch_show",
+        "watch_source_add",
+        "watch_source_list",
+        "watch_source_remove",
+        "watch_source_remove_menu",
+    }
+    for command_name in watch_id_commands:
+        assert commands_by_name[command_name]._params["watch_id"].autocomplete is not None
+    assert (
+        commands_by_name["watch_source_remove"]
+        ._params["source_id"]
+        .autocomplete
+        is not None
+    )

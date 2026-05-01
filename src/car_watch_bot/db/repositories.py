@@ -228,6 +228,18 @@ class WatchRepository:
             )
         )
 
+    def get_for_user(self, watch_id: int, user_id: int) -> Watch | None:
+        """Return a watch owned by a user, including inactive watches."""
+
+        return self.session.scalar(
+            select(Watch)
+            .options(selectinload(Watch.watch_sources).selectinload(WatchSource.source))
+            .where(
+                Watch.id == watch_id,
+                Watch.user_id == user_id,
+            )
+        )
+
     def list_all_active(self) -> list[Watch]:
         """List all active watches with sources loaded."""
 

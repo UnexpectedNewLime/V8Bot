@@ -17,6 +17,8 @@ The current command tree contains:
 - `/ping`.
 - `/watch_add`.
 - `/watch_list`.
+- `/watch_show`.
+- `/watch_edit`.
 - `/watch_remove`.
 - `/watch_keyword_add`.
 - `/watch_keyword_remove`.
@@ -25,6 +27,7 @@ The current command tree contains:
 - `/watch_source_add`.
 - `/watch_source_list`.
 - `/watch_source_remove`.
+- `/watch_source_remove_menu`.
 - `/watch_source_test`.
 - `/watch_scrape_now`.
 - `/watch_listings`.
@@ -69,11 +72,61 @@ Lists the user's active watches with:
 - Preferred currency and distance unit.
 - Active source count.
 
+## `/watch_show`
+
+Options:
+
+- `watch_id`: required integer with user-scoped autocomplete.
+
+Behavior:
+
+- Shows a detailed private view of an owned watch.
+- Includes inactive owned watches so users can inspect watches deactivated by
+  `/watch_remove` or `/watch_edit active:false`.
+- Shows name, car query, active status, keywords, exclusions, notification time,
+  timezone, currency, distance unit, delivery ids, criteria version, active
+  source count, and source details.
+
+## `/watch_edit`
+
+Options:
+
+- `watch_id`: required integer with user-scoped autocomplete.
+- `car_query`: optional replacement search query.
+- `watch_name`: optional replacement display/thread name.
+- `keywords`: optional replacement comma-separated included keyword list.
+- `exclude_keywords`: optional replacement comma-separated excluded keyword
+  list.
+- `clear_exclusions`: optional boolean to clear all excluded keywords.
+- `notify_time`: optional replacement `HH:MM` notification time.
+- `timezone`: optional replacement IANA timezone, such as `Australia/Sydney`.
+- `currency`: optional replacement three-letter currency code.
+- `distance_unit`: optional replacement `km` or `mi`.
+- `channel_id`: optional replacement Discord channel id.
+- `thread_id`: optional replacement Discord thread id.
+- `clear_channel`: optional boolean that clears the stored channel and thread.
+- `clear_thread`: optional boolean that clears only the stored thread.
+- `use_current_channel`: optional boolean that stores the current command
+  channel and guild as the delivery target.
+- `active`: optional boolean. `false` deactivates the watch; `true` reactivates
+  an inactive owned watch.
+
+Behavior:
+
+- Omitted fields are left unchanged.
+- Validation happens in `WatchService`.
+- Query, included keyword, and excluded keyword changes increment
+  `criteria_version` once per edit.
+- Setting a new channel clears the old thread unless a replacement thread id is
+  supplied in the same edit.
+- Returns an ephemeral updated watch detail view, or an unchanged view when no
+  stored fields changed.
+
 ## `/watch_remove`
 
 Options:
 
-- `watch_id`: required integer.
+- `watch_id`: required integer with user-scoped autocomplete.
 
 Behavior:
 
@@ -87,7 +140,7 @@ Behavior:
 
 Options:
 
-- `watch_id`: required integer.
+- `watch_id`: required integer with user-scoped autocomplete.
 - `keyword`: required string.
 
 Behavior:
@@ -103,7 +156,7 @@ Behavior:
 
 Options:
 
-- `watch_id`: required integer.
+- `watch_id`: required integer with user-scoped autocomplete.
 - `url`: required field containing one or more URLs.
 - `name`: optional name, only allowed with one URL.
 
@@ -121,7 +174,7 @@ Behavior:
 
 Options:
 
-- `watch_id`: required integer.
+- `watch_id`: required integer with user-scoped autocomplete.
 
 Behavior:
 
@@ -132,12 +185,27 @@ Behavior:
 
 Options:
 
-- `watch_id`: required integer.
-- `source_id`: required integer.
+- `watch_id`: required integer with user-scoped autocomplete.
+- `source_id`: required integer with source autocomplete scoped to the selected
+  owned watch.
 
 Behavior:
 
 - Disables the watch-source association.
+- Does not delete source or listing history.
+
+### `/watch_source_remove_menu`
+
+Options:
+
+- `watch_id`: required integer with user-scoped autocomplete.
+
+Behavior:
+
+- Lists active enabled sources attached to the watch in an ephemeral select
+  menu.
+- Removes the chosen source from the watch.
+- Limits the select menu to Discord's first 25 active source options.
 - Does not delete source or listing history.
 
 ### `/watch_source_test`
@@ -161,7 +229,7 @@ Behavior:
 
 Options:
 
-- `watch_id`: required integer.
+- `watch_id`: required integer with user-scoped autocomplete.
 
 Behavior:
 
@@ -176,7 +244,7 @@ Behavior:
 
 Options:
 
-- `watch_id`: required integer.
+- `watch_id`: required integer with user-scoped autocomplete.
 
 Behavior:
 
@@ -194,7 +262,7 @@ preferences.
 
 Options:
 
-- `watch_id`: required integer.
+- `watch_id`: required integer with user-scoped autocomplete.
 - `notify_time`, `currency`, or `distance_unit` depending on command.
 
 Behavior:

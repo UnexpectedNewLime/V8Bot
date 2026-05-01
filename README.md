@@ -111,6 +111,8 @@ The current Discord interface registers:
 - `/ping`
 - `/watch_add`
 - `/watch_list`
+- `/watch_show`
+- `/watch_edit`
 - `/watch_remove`
 - `/watch_keyword_add`
 - `/watch_keyword_remove`
@@ -119,6 +121,7 @@ The current Discord interface registers:
 - `/watch_source_add`
 - `/watch_source_list`
 - `/watch_source_remove`
+- `/watch_source_remove_menu`
 - `/watch_source_test`
 - `/watch_scrape_now`
 - `/watch_listings`
@@ -159,13 +162,27 @@ You can also run the flow manually:
 
 ```text
 /watch_add
+/watch_show
+/watch_edit
 /watch_source_add
 /watch_scrape_now
 /watch_listings
 ```
 
+Commands that accept a `watch_id` offer Discord autocomplete scoped to your
+active watches. `/watch_source_remove` also autocompletes `source_id` after a
+watch is selected, and `/watch_source_remove_menu` lets you remove a source from
+an ephemeral select menu.
+
 `/watch_source_add` accepts one or more URLs in its `url` field. The optional
 `name` field can only be used with a single URL.
+
+Use `/watch_show watch_id:<id>` for the full watch configuration, including
+delivery ids and source details. Use `/watch_edit watch_id:<id>` with only the
+fields you want to change. Supported edit fields include `car_query`,
+`watch_name`, `keywords`, `exclude_keywords`, `clear_exclusions`, `notify_time`,
+`timezone`, `currency`, `distance_unit`, `channel_id`, `thread_id`,
+`clear_channel`, `clear_thread`, `use_current_channel`, and `active`.
 
 ## Local Scrape Flow Without Discord
 

@@ -63,8 +63,12 @@ A watch currently stores:
 - Notification time and timezone.
 - Criteria version and active state.
 
-Material keyword or source changes increment `criteria_version`. Watch commands
-scope operations to the interacting Discord user.
+Material query, keyword, or source changes increment `criteria_version`. Watch
+commands scope operations to the interacting Discord user. Users can inspect the
+full configuration for an owned watch with `/watch_show`. They can use
+`/watch_edit` to update the stored query, name, keyword lists, notification
+time, timezone, preferred units, delivery ids, and active status without
+recreating the watch.
 
 ## Source Behavior
 
