@@ -25,7 +25,6 @@ The current command tree contains:
 - `/watch_source_add`.
 - `/watch_source_list`.
 - `/watch_source_remove`.
-- `/watch_source_remove_menu`.
 - `/watch_source_test`.
 - `/watch_scrape_now`.
 - `/watch_listings`.
@@ -74,7 +73,7 @@ Lists the user's active watches with:
 
 Options:
 
-- `watch_id`: required integer with user-scoped autocomplete.
+- `watch_id`: required integer.
 
 Behavior:
 
@@ -88,7 +87,7 @@ Behavior:
 
 Options:
 
-- `watch_id`: required integer with user-scoped autocomplete.
+- `watch_id`: required integer.
 - `keyword`: required string.
 
 Behavior:
@@ -104,7 +103,7 @@ Behavior:
 
 Options:
 
-- `watch_id`: required integer with user-scoped autocomplete.
+- `watch_id`: required integer.
 - `url`: required field containing one or more URLs.
 - `name`: optional name, only allowed with one URL.
 
@@ -122,7 +121,7 @@ Behavior:
 
 Options:
 
-- `watch_id`: required integer with user-scoped autocomplete.
+- `watch_id`: required integer.
 
 Behavior:
 
@@ -133,27 +132,12 @@ Behavior:
 
 Options:
 
-- `watch_id`: required integer with user-scoped autocomplete.
-- `source_id`: required integer with source autocomplete scoped to the selected
-  owned watch.
+- `watch_id`: required integer.
+- `source_id`: required integer.
 
 Behavior:
 
 - Disables the watch-source association.
-- Does not delete source or listing history.
-
-### `/watch_source_remove_menu`
-
-Options:
-
-- `watch_id`: required integer with user-scoped autocomplete.
-
-Behavior:
-
-- Lists active enabled sources attached to the watch in an ephemeral select
-  menu.
-- Removes the chosen source from the watch.
-- Limits the select menu to Discord's first 25 active source options.
 - Does not delete source or listing history.
 
 ### `/watch_source_test`
@@ -177,7 +161,7 @@ Behavior:
 
 Options:
 
-- `watch_id`: required integer with user-scoped autocomplete.
+- `watch_id`: required integer.
 
 Behavior:
 
@@ -192,7 +176,7 @@ Behavior:
 
 Options:
 
-- `watch_id`: required integer with user-scoped autocomplete.
+- `watch_id`: required integer.
 
 Behavior:
 
@@ -210,7 +194,7 @@ preferences.
 
 Options:
 
-- `watch_id`: required integer with user-scoped autocomplete.
+- `watch_id`: required integer.
 - `notify_time`, `currency`, or `distance_unit` depending on command.
 
 Behavior:
