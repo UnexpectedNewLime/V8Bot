@@ -1273,19 +1273,27 @@ def _format_digest_listing(listing: DigestListing) -> str:
     """Format one pending listing."""
 
     reasons = ", ".join(listing.score_reasons) or "none"
-    return "\n".join(
-        [
-            f"listing_id: {listing.listing_id}",
-            f"title: {listing.title}",
-            f"source: {listing.source_name}",
-            f"original price: {listing.original_price}",
-            f"converted price: {listing.converted_price}",
-            f"original mileage: {listing.original_mileage}",
-            f"converted mileage: {listing.converted_mileage}",
-            f"score reasons: {reasons}",
-            f"link: {listing.url}",
-        ]
-    )
+    lines = [
+        f"listing_id: {listing.listing_id}",
+        f"title: {listing.title}",
+        f"source: {listing.source_name}",
+        f"original price: {listing.original_price}",
+        f"converted price: {listing.converted_price}",
+        f"original mileage: {listing.original_mileage}",
+        f"converted mileage: {listing.converted_mileage}",
+    ]
+    if listing.price_change:
+        lines.append(f"price change: {listing.price_change}")
+    if listing.location:
+        lines.append(f"location: {listing.location}")
+    if listing.first_seen:
+        lines.append(f"first seen: {listing.first_seen}")
+    if listing.last_seen:
+        lines.append(f"last seen: {listing.last_seen}")
+    if listing.seller_info:
+        lines.append(f"seller info: {listing.seller_info}")
+    lines.extend([f"score reasons: {reasons}", f"link: {listing.url}"])
+    return "\n".join(lines)
 
 
 def _comma_list(values: list[str]) -> str:

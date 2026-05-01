@@ -154,6 +154,9 @@ Expected result:
 - Listing messages are posted publicly to the channel.
 - Each listing is its own embed.
 - Prices use whole-number car formatting, such as `AUD 26,850`.
+- Embeds include optional location, first seen, last seen, seller/dealer details,
+  listing images, and price-change details when the stored listing data has
+  those values.
 
 You can also run the flow manually:
 
@@ -239,6 +242,23 @@ When the bot is running, APScheduler starts:
 Digest checks send only stored, unnotified listings for watches whose local
 `notify_time` matches the current minute.
 
+## Listing Embeds
+
+Listing embeds always include the listing title/link, source, converted price,
+original price, converted mileage, original mileage, and score reasons. When
+available, embeds also include:
+
+- location from the normalized listing row
+- first seen and last seen timestamps from stored listing rows, shown in Sydney
+  local time
+- seller or dealer details extracted from scraper `raw_payload`
+- a thumbnail image URL extracted from scraper `raw_payload`
+- price-change text when V8Bot has stored a prior price snapshot
+
+V8Bot stores price baselines in listing `raw_payload` for rows created or
+refreshed by this version. Older rows without that metadata will not claim a
+price change until a future scrape stores enough comparison data.
+
 ## Run Tests
 
 ```bash
@@ -268,7 +288,8 @@ Useful queries:
 select id, discord_user_id from users;
 select id, user_id, name, query, notification_time from watches;
 select id, name, kind, base_url, is_active from sources;
-select id, title, url, price_amount, mileage_value from listings;
+select id, title, url, price_amount, mileage_value, location_text, first_seen_at, last_seen_at
+from listings;
 ```
 
 ## Podman Deployment
