@@ -3,10 +3,26 @@
 import asyncio
 from decimal import Decimal
 
-from car_watch_bot.db.repositories import SourceRepository, UserRepository, WatchRepository
+import pytest
+from sqlalchemy import select
+
+from car_watch_bot.core.listing_status import (
+    LISTING_STATUS_INACTIVE,
+    LISTING_STATUS_STARRED,
+)
+from car_watch_bot.db.models import WatchListing
+from car_watch_bot.db.repositories import (
+    SourceRepository,
+    UserRepository,
+    WatchRepository,
+)
 from car_watch_bot.scrapers.mock import MockScraper
-from car_watch_bot.services.listing_service import ListingService
-from car_watch_bot.services.watch_service import WatchService
+from car_watch_bot.services.listing_service import (
+    ListingService,
+    ListingStatusValidationError,
+    WatchListingNotFoundError,
+)
+from car_watch_bot.services.watch_service import WatchNotFoundError, WatchService
 
 
 def _listing_service(db_session_factory) -> ListingService:
@@ -84,6 +100,108 @@ def test_watch_listings_includes_sent_listing_history(db_session_factory) -> Non
     listings = service.list_watch_listings("123", 1)
 
     assert len(listings) == 3
+
+
+def test_listing_status_actions_update_visible_history(db_session_factory) -> None:
+    test_scrape_watch_now_stores_pending_listings(db_session_factory)
+    service = _listing_service(db_session_factory)
+
+    starred = service.update_watch_listing_status(
+        "123",
+        1,
+        1,
+        LISTING_STATUS_STARRED,
+    )
+    inactive = service.update_watch_listing_status(
+        "123",
+        1,
+        2,
+        LISTING_STATUS_INACTIVE,
+    )
+
+    visible_listing_ids = [
+        listing.listing_id for listing in service.list_watch_listings("123", 1)
+    ]
+    with db_session_factory() as session:
+        watch_listings = list(
+            session.scalars(
+                select(WatchListing).order_by(WatchListing.listing_id)
+            )
+        )
+
+    assert starred.status == LISTING_STATUS_STARRED
+    assert inactive.status == LISTING_STATUS_INACTIVE
+    assert visible_listing_ids == [1, 3]
+    assert [row.status for row in watch_listings] == [
+        LISTING_STATUS_STARRED,
+        LISTING_STATUS_INACTIVE,
+        "pending_digest",
+    ]
+    assert [row.sent_at is not None for row in watch_listings] == [True, True, False]
+
+
+def test_inactive_listing_is_not_reactivated_by_later_scrapes(
+    db_session_factory,
+) -> None:
+    test_scrape_watch_now_stores_pending_listings(db_session_factory)
+    service = _listing_service(db_session_factory)
+    service.update_watch_listing_status(
+        "123",
+        1,
+        1,
+        LISTING_STATUS_INACTIVE,
+    )
+
+    result = asyncio.run(service.scrape_watch_now("123", 1))
+    visible_listing_ids = [
+        listing.listing_id for listing in service.list_watch_listings("123", 1)
+    ]
+    with db_session_factory() as session:
+        inactive_row = session.scalar(
+            select(WatchListing).where(WatchListing.listing_id == 1)
+        )
+
+    assert result.new_listing_ids == []
+    assert result.pending_listings == 2
+    assert visible_listing_ids == [2, 3]
+    assert inactive_row is not None
+    assert inactive_row.status == LISTING_STATUS_INACTIVE
+
+
+def test_listing_status_update_is_scoped_to_owner(db_session_factory) -> None:
+    test_scrape_watch_now_stores_pending_listings(db_session_factory)
+
+    with pytest.raises(WatchNotFoundError):
+        _listing_service(db_session_factory).update_watch_listing_status(
+            "456",
+            1,
+            1,
+            LISTING_STATUS_STARRED,
+        )
+
+
+def test_listing_status_update_rejects_unknown_listing(db_session_factory) -> None:
+    test_scrape_watch_now_stores_pending_listings(db_session_factory)
+
+    with pytest.raises(WatchListingNotFoundError):
+        _listing_service(db_session_factory).update_watch_listing_status(
+            "123",
+            1,
+            999,
+            LISTING_STATUS_STARRED,
+        )
+
+
+def test_listing_status_update_rejects_internal_statuses(db_session_factory) -> None:
+    test_scrape_watch_now_stores_pending_listings(db_session_factory)
+
+    with pytest.raises(ListingStatusValidationError):
+        _listing_service(db_session_factory).update_watch_listing_status(
+            "123",
+            1,
+            1,
+            "sent",
+        )
 
 
 def test_scrape_watch_now_reports_skipped_sources(db_session_factory) -> None:

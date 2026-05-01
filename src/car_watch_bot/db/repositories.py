@@ -8,6 +8,13 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from car_watch_bot.core.listing_status import (
+    DELIVERABLE_LISTING_STATUSES,
+    LISTING_STATUS_EXCLUDED,
+    LISTING_STATUS_PENDING_DIGEST,
+    LISTING_STATUS_SENT,
+    VISIBLE_LISTING_STATUSES,
+)
 from car_watch_bot.core.models import ListingCandidate, ScoreResult
 from car_watch_bot.db.models import (
     Listing,
@@ -141,6 +148,20 @@ class WatchRepository:
         if watch is None:
             return None
         watch.thread_id = thread_id
+        self.session.flush()
+        return watch
+
+    def set_starred_thread_id(
+        self,
+        watch_id: int,
+        thread_id: str | None,
+    ) -> Watch | None:
+        """Persist the Discord starred-thread id associated with a watch."""
+
+        watch = self.session.get(Watch, watch_id)
+        if watch is None:
+            return None
+        watch.starred_thread_id = thread_id
         self.session.flush()
         return watch
 
@@ -351,8 +372,8 @@ class ListingRepository:
             )
         )
         if watch_listing is not None:
-            if watch_listing.status == "excluded":
-                watch_listing.status = "pending_digest"
+            if watch_listing.status == LISTING_STATUS_EXCLUDED:
+                watch_listing.status = LISTING_STATUS_PENDING_DIGEST
                 watch_listing.sent_at = None
                 watch_listing.watch_criteria_version = watch.criteria_version
                 self.session.flush()
@@ -376,9 +397,12 @@ class ListingRepository:
                 WatchListing.listing_id == listing.id,
             )
         )
-        if watch_listing is None or watch_listing.status != "pending_digest":
+        if (
+            watch_listing is None
+            or watch_listing.status != LISTING_STATUS_PENDING_DIGEST
+        ):
             return
-        watch_listing.status = "excluded"
+        watch_listing.status = LISTING_STATUS_EXCLUDED
         watch_listing.watch_criteria_version = watch.criteria_version
         self.session.flush()
 
@@ -391,7 +415,7 @@ class ListingRepository:
                 .join(WatchListing)
                 .where(
                     WatchListing.watch_id == watch_id,
-                    WatchListing.status == "pending_digest",
+                    WatchListing.status.in_(DELIVERABLE_LISTING_STATUSES),
                 )
                 .order_by(Listing.id)
             )
@@ -406,7 +430,7 @@ class ListingRepository:
                 .join(WatchListing)
                 .where(
                     WatchListing.watch_id == watch_id,
-                    WatchListing.status.in_(["pending_digest", "sent"]),
+                    WatchListing.status.in_(VISIBLE_LISTING_STATUSES),
                 )
                 .order_by(Listing.id)
             )
@@ -427,7 +451,7 @@ class ListingRepository:
                 .join(WatchListing)
                 .where(
                     WatchListing.watch_id == watch_id,
-                    WatchListing.status == "pending_digest",
+                    WatchListing.status.in_(DELIVERABLE_LISTING_STATUSES),
                     Listing.id.in_(listing_ids),
                 )
                 .order_by(Listing.id)
@@ -473,13 +497,41 @@ class ListingRepository:
             select(WatchListing).where(
                 WatchListing.watch_id == watch_id,
                 WatchListing.listing_id.in_(listing_ids),
-                WatchListing.status == "pending_digest",
+                WatchListing.status.in_(DELIVERABLE_LISTING_STATUSES),
             )
         )
         for watch_listing in watch_listings:
-            watch_listing.status = "sent"
+            watch_listing.status = LISTING_STATUS_SENT
             watch_listing.sent_at = datetime.utcnow()
         self.session.flush()
+
+    def update_watch_listing_status_for_user(
+        self,
+        user_id: int,
+        watch_id: int,
+        listing_id: int,
+        status: str,
+    ) -> WatchListing | None:
+        """Update a watch-listing status owned by a user."""
+
+        watch_listing = self.session.scalar(
+            select(WatchListing)
+            .join(Watch)
+            .where(
+                Watch.id == watch_id,
+                Watch.user_id == user_id,
+                Watch.is_active.is_(True),
+                WatchListing.watch_id == watch_id,
+                WatchListing.listing_id == listing_id,
+            )
+        )
+        if watch_listing is None:
+            return None
+        watch_listing.status = status
+        if watch_listing.sent_at is None:
+            watch_listing.sent_at = datetime.utcnow()
+        self.session.flush()
+        return watch_listing
 
 
 class ScrapeAttemptRepository:

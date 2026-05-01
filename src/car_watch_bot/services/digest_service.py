@@ -41,7 +41,7 @@ class DigestService:
         return self._build_digest_from_listings(watch, listings)
 
     def build_listing_history(self, watch: Watch) -> DigestPayload | None:
-        """Build a listing payload for all non-excluded watch listings."""
+        """Build a listing payload for visible watch listings."""
 
         listings = self.listing_repository.list_visible_for_watch(watch.id)
         return self._build_digest_from_listings(watch, listings)

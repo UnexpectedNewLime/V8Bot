@@ -10,6 +10,7 @@ import discord
 from discord import app_commands
 
 from car_watch_bot.bot.embeds import build_listing_embed
+from car_watch_bot.bot.listing_actions import build_listing_action_view
 from car_watch_bot.bot.watch_threads import resolve_watch_thread
 from car_watch_bot.core.models import DigestListing, ScrapeNowResult, SourceTestResult
 from car_watch_bot.services.listing_service import ListingService
@@ -523,6 +524,7 @@ async def _send_public_listing_embeds(
                 heading=heading,
                 query=target.watch_query,
             ),
+            view=build_listing_action_view(watch_id, listing.listing_id),
             silent=True,
         )
 

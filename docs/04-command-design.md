@@ -168,7 +168,8 @@ Behavior:
 - Scrapes each active enabled source attached to the owned watch when a matching
   adapter exists.
 - Skips sources with no adapter and reports warnings.
-- Posts newly pending listings as embeds in the watch thread.
+- Posts newly pending listings as embeds with listing action buttons in the
+  watch thread.
 - Marks the posted listing ids sent.
 - Returns an ephemeral scrape summary.
 
@@ -180,12 +181,24 @@ Options:
 
 Behavior:
 
-- Builds listing history for visible watch listings, including `pending_digest`
-  and `sent` rows.
-- Posts embeds in the watch thread.
+- Builds listing history for visible watch listings, including `pending_digest`,
+  `sent`, and `starred` rows.
+- Posts embeds with listing action buttons in the watch thread.
 - Does not mark listings sent.
 - The command description currently says "pending watch listings", but the
   implementation includes sent listing history too.
+
+### Listing Action Buttons
+
+Listing embeds expose Star and Delete buttons. Button clicks update
+`watch_listings.status` through the listing service and are scoped to the
+Discord user who owns the watch.
+
+Star marks the watch-listing `starred` and copies the listing embed to a
+per-watch shortlist thread named `Starred <car search name>`. Delete first asks
+for confirmation, then marks the watch-listing `inactive`, deletes the clicked
+Discord message, and prevents the row from becoming pending again on later
+scrapes.
 
 ## Preference Commands
 

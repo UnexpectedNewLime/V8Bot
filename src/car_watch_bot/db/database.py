@@ -22,17 +22,23 @@ def init_database(engine: Engine) -> None:
     """Create database tables for the local prototype."""
 
     Base.metadata.create_all(engine)
-    _ensure_watch_thread_id_column(engine)
+    _ensure_watch_thread_columns(engine)
 
 
-def _ensure_watch_thread_id_column(engine: Engine) -> None:
+def _ensure_watch_thread_columns(engine: Engine) -> None:
     """Add watch thread persistence for existing prototype databases."""
 
     inspector = inspect(engine)
     if "watches" not in inspector.get_table_names():
         return
     column_names = {column["name"] for column in inspector.get_columns("watches")}
-    if "thread_id" in column_names:
+    missing_columns = [
+        column_name
+        for column_name in ["thread_id", "starred_thread_id"]
+        if column_name not in column_names
+    ]
+    if not missing_columns:
         return
     with engine.begin() as connection:
-        connection.execute(text("ALTER TABLE watches ADD COLUMN thread_id VARCHAR(32)"))
+        for column_name in missing_columns:
+            connection.execute(text(f"ALTER TABLE watches ADD COLUMN {column_name} VARCHAR(32)"))

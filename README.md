@@ -148,9 +148,16 @@ per user, such as `cars-on-line` and `cars-on-line 2`.
 Expected result:
 
 - The command response is private to the user.
-- Listing messages are posted publicly to the channel.
+- Listing messages are posted publicly to the watch thread.
 - Each listing is its own embed.
+- Each listing embed has Star and Delete buttons.
 - Prices use whole-number car formatting, such as `AUD 26,850`.
+
+Listing action buttons update the stored watch-listing status for the user who
+owns the watch. Star copies the listing into a `Starred <car search name>`
+thread and keeps it visible in `/watch_listings`. Delete asks for confirmation,
+removes the clicked Discord message, and keeps the listing out of later scrape
+output for that watch.
 
 You can also run the flow manually:
 
@@ -220,7 +227,10 @@ When the bot is running, APScheduler starts:
 - digest checks every minute
 
 Digest checks send only stored, unnotified listings for watches whose local
-`notify_time` matches the current minute.
+`notify_time` matches the current minute. Digest listing embeds include the same
+listing action buttons as manual scrape output. Successfully sent digest rows
+are marked `sent`, while starred and inactive rows are not treated as pending
+digest items.
 
 ## Run Tests
 
@@ -252,6 +262,7 @@ select id, discord_user_id from users;
 select id, user_id, name, query, notification_time from watches;
 select id, name, kind, base_url, is_active from sources;
 select id, title, url, price_amount, mileage_value from listings;
+select watch_id, listing_id, status, sent_at from watch_listings;
 ```
 
 ## Podman Deployment

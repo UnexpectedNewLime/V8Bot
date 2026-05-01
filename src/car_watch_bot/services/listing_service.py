@@ -1,9 +1,11 @@
 """Listing service for user-facing scrape and listing inspection."""
 
+from dataclasses import dataclass
 from decimal import Decimal
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from car_watch_bot.core.listing_status import USER_SETTABLE_LISTING_STATUSES
 from car_watch_bot.core.models import DigestListing, ScrapeNowResult
 from car_watch_bot.db.repositories import (
     ListingRepository,
@@ -16,6 +18,27 @@ from car_watch_bot.scrapers.base import ScraperAdapter
 from car_watch_bot.services.digest_service import DigestService
 from car_watch_bot.services.scrape_service import ScrapeService
 from car_watch_bot.services.watch_service import WatchNotFoundError
+
+
+class ListingServiceError(Exception):
+    """Base exception for listing service failures."""
+
+
+class ListingStatusValidationError(ListingServiceError):
+    """Raised when a requested listing status is invalid."""
+
+
+class WatchListingNotFoundError(ListingServiceError):
+    """Raised when a listing is not attached to an owned watch."""
+
+
+@dataclass(frozen=True)
+class ListingStatusUpdateResult:
+    """Result returned after a watch-listing status update."""
+
+    watch_id: int
+    listing_id: int
+    status: str
 
 
 class ListingService:
@@ -133,5 +156,41 @@ class ListingService:
             watch = WatchRepository(session).get_active_for_user(watch_id, user.id)
             if watch is None:
                 raise WatchNotFoundError("watch not found")
-            DigestService(ListingRepository(session)).mark_digest_sent(watch.id, listing_ids)
+            DigestService(ListingRepository(session)).mark_digest_sent(
+                watch.id,
+                listing_ids,
+            )
             session.commit()
+
+    def update_watch_listing_status(
+        self,
+        discord_user_id: str,
+        watch_id: int,
+        listing_id: int,
+        status: str,
+    ) -> ListingStatusUpdateResult:
+        """Update one watch-listing status for an owning Discord user."""
+
+        if status not in USER_SETTABLE_LISTING_STATUSES:
+            raise ListingStatusValidationError("unsupported listing status")
+        with self.session_factory() as session:
+            user = UserRepository(session).get_or_create_by_discord_id(discord_user_id)
+            watch = WatchRepository(session).get_active_for_user(watch_id, user.id)
+            if watch is None:
+                raise WatchNotFoundError("watch not found")
+            listing_repository = ListingRepository(session)
+            watch_listing = listing_repository.update_watch_listing_status_for_user(
+                user_id=user.id,
+                watch_id=watch.id,
+                listing_id=listing_id,
+                status=status,
+            )
+            if watch_listing is None:
+                raise WatchListingNotFoundError("listing not found for watch")
+            result = ListingStatusUpdateResult(
+                watch_id=watch.id,
+                listing_id=listing_id,
+                status=watch_listing.status,
+            )
+            session.commit()
+            return result

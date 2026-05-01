@@ -51,6 +51,7 @@ class Watch(Base):
     guild_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     channel_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     thread_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    starred_thread_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     name: Mapped[str] = mapped_column(String(120))
     query: Mapped[str] = mapped_column(String(240))
     included_keywords: Mapped[list[str]] = mapped_column(JSON, default=list)

@@ -14,7 +14,7 @@ from car_watch_bot.db.repositories import (
 )
 
 
-def test_init_database_adds_thread_id_to_existing_watch_table() -> None:
+def test_init_database_adds_thread_ids_to_existing_watch_table() -> None:
     engine = create_database_engine("sqlite:///:memory:")
     with engine.begin() as connection:
         connection.execute(
@@ -35,6 +35,7 @@ def test_init_database_adds_thread_id_to_existing_watch_table() -> None:
             for row in connection.execute(text("PRAGMA table_info(watches)")).fetchall()
         }
     assert "thread_id" in columns
+    assert "starred_thread_id" in columns
 
 
 def test_user_creation_is_idempotent(db_session) -> None:
@@ -75,6 +76,23 @@ def test_watch_thread_id_can_be_persisted(db_session) -> None:
     assert updated_watch is not None
     assert updated_watch.thread_id == "555"
     assert watches.list_active_for_user(user.id)[0].thread_id == "555"
+
+
+def test_watch_starred_thread_id_can_be_persisted(db_session) -> None:
+    user = UserRepository(db_session).get_or_create_by_discord_id("123")
+    watches = WatchRepository(db_session)
+    watch = watches.create_watch(
+        user_id=user.id,
+        name="C5 watch",
+        query="C5 Corvette",
+        included_keywords=["manual"],
+    )
+
+    updated_watch = watches.set_starred_thread_id(watch.id, "777")
+
+    assert updated_watch is not None
+    assert updated_watch.starred_thread_id == "777"
+    assert watches.list_active_for_user(user.id)[0].starred_thread_id == "777"
 
 
 def test_source_creation_and_watch_assignment(db_session) -> None:

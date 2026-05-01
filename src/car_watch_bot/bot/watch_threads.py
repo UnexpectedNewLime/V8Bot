@@ -28,6 +28,13 @@ def build_watch_thread_name(target: WatchDeliveryTarget) -> str:
     return _truncate_thread_name(raw_name)
 
 
+def build_starred_watch_thread_name(target: WatchDeliveryTarget) -> str:
+    """Build the Discord thread name for a watch's starred shortlist."""
+
+    name = _clean_name_part(target.watch_name or target.watch_query)
+    return _truncate_thread_name(f"Starred {name}")
+
+
 async def resolve_watch_thread(client: discord.Client, target: WatchDeliveryTarget) -> Any:
     """Return an existing or newly-created Discord thread for a watch target."""
 
@@ -38,6 +45,21 @@ async def resolve_watch_thread(client: discord.Client, target: WatchDeliveryTarg
 
     channel = await _sendable_channel(client, target.channel_id)
     return await _create_public_thread(channel, build_watch_thread_name(target))
+
+
+async def resolve_starred_watch_thread(
+    client: discord.Client,
+    target: WatchDeliveryTarget,
+) -> Any:
+    """Return an existing or newly-created Discord thread for starred listings."""
+
+    stored_thread = await _fetch_stored_thread(client, target.starred_thread_id)
+    if stored_thread is not None and hasattr(stored_thread, "send"):
+        await _unarchive_if_needed(stored_thread, target.watch_id)
+        return stored_thread
+
+    channel = await _sendable_channel(client, target.channel_id)
+    return await _create_public_thread(channel, build_starred_watch_thread_name(target))
 
 
 async def send_to_watch_thread(
