@@ -27,6 +27,122 @@ def _content_hash(title: str, url: str) -> str:
     return sha256(f"{title.casefold()}|{url}".encode("utf-8")).hexdigest()
 
 
+FIRST_SEEN_PRICE_AMOUNT_KEY = "v8bot_first_seen_price_amount"
+FIRST_SEEN_PRICE_CURRENCY_KEY = "v8bot_first_seen_price_currency"
+PREVIOUS_PRICE_AMOUNT_KEY = "v8bot_previous_price_amount"
+PREVIOUS_PRICE_CURRENCY_KEY = "v8bot_previous_price_currency"
+PRICE_CHANGED_AT_KEY = "v8bot_price_changed_at"
+
+
+def _listing_raw_payload_for_insert(listing: ListingCandidate) -> dict[str, Any]:
+    """Return scraper metadata augmented with V8Bot price history."""
+
+    raw_payload = _payload_dict(listing.raw_payload)
+    _set_price_snapshot(
+        raw_payload,
+        FIRST_SEEN_PRICE_AMOUNT_KEY,
+        FIRST_SEEN_PRICE_CURRENCY_KEY,
+        listing.price_amount,
+        listing.price_currency,
+    )
+    return raw_payload
+
+
+def _listing_raw_payload_for_update(
+    db_listing: "Listing",
+    listing: ListingCandidate,
+) -> dict[str, Any]:
+    """Return refreshed scraper metadata preserving known price history."""
+
+    raw_payload = _payload_dict(listing.raw_payload)
+    existing_payload = _payload_dict(db_listing.raw_payload)
+    if _has_price_snapshot(
+        existing_payload,
+        FIRST_SEEN_PRICE_AMOUNT_KEY,
+        FIRST_SEEN_PRICE_CURRENCY_KEY,
+    ):
+        raw_payload[FIRST_SEEN_PRICE_AMOUNT_KEY] = existing_payload[
+            FIRST_SEEN_PRICE_AMOUNT_KEY
+        ]
+        raw_payload[FIRST_SEEN_PRICE_CURRENCY_KEY] = existing_payload[
+            FIRST_SEEN_PRICE_CURRENCY_KEY
+        ]
+    else:
+        _set_price_snapshot(
+            raw_payload,
+            FIRST_SEEN_PRICE_AMOUNT_KEY,
+            FIRST_SEEN_PRICE_CURRENCY_KEY,
+            db_listing.price_amount,
+            db_listing.price_currency,
+        )
+
+    if _price_changed(
+        db_listing.price_amount,
+        db_listing.price_currency,
+        listing.price_amount,
+        listing.price_currency,
+    ):
+        _set_price_snapshot(
+            raw_payload,
+            PREVIOUS_PRICE_AMOUNT_KEY,
+            PREVIOUS_PRICE_CURRENCY_KEY,
+            db_listing.price_amount,
+            db_listing.price_currency,
+        )
+        raw_payload[PRICE_CHANGED_AT_KEY] = (
+            datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        )
+    return raw_payload
+
+
+def _payload_dict(payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Return a mutable JSON object payload."""
+
+    if not isinstance(payload, dict):
+        return {}
+    return dict(payload)
+
+
+def _set_price_snapshot(
+    payload: dict[str, Any],
+    amount_key: str,
+    currency_key: str,
+    amount: Decimal | None,
+    currency: str | None,
+) -> None:
+    """Store a JSON-safe price snapshot when complete."""
+
+    if amount is None or not currency:
+        return
+    payload[amount_key] = f"{amount:.2f}"
+    payload[currency_key] = currency
+
+
+def _has_price_snapshot(
+    payload: dict[str, Any],
+    amount_key: str,
+    currency_key: str,
+) -> bool:
+    """Return whether a payload has a complete price snapshot."""
+
+    return bool(payload.get(amount_key) and payload.get(currency_key))
+
+
+def _price_changed(
+    old_amount: Decimal | None,
+    old_currency: str | None,
+    new_amount: Decimal | None,
+    new_currency: str | None,
+) -> bool:
+    """Return whether two complete price values differ."""
+
+    if old_amount is None or new_amount is None:
+        return False
+    if not old_currency or not new_currency:
+        return False
+    return old_amount != new_amount or old_currency != new_currency
+
+
 class UserRepository:
     """Persistence operations for users."""
 
@@ -301,7 +417,7 @@ class ListingRepository:
             score=score_result.score,
             score_reasons=score_result.reasons,
             content_hash=_content_hash(listing.title, listing.url),
-            raw_payload=listing.raw_payload or {},
+            raw_payload=_listing_raw_payload_for_insert(listing),
         )
         self.session.add(db_listing)
         self.session.flush()
@@ -461,7 +577,7 @@ class ListingRepository:
         db_listing.score = score_result.score
         db_listing.score_reasons = score_result.reasons
         db_listing.content_hash = _content_hash(listing.title, listing.url)
-        db_listing.raw_payload = listing.raw_payload or {}
+        db_listing.raw_payload = _listing_raw_payload_for_update(db_listing, listing)
         db_listing.last_seen_at = datetime.utcnow()
 
     def mark_listings_as_notified(self, watch_id: int, listing_ids: list[int]) -> None:

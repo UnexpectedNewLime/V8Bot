@@ -215,6 +215,12 @@ Each listing is rendered as its own Discord embed. The embed contains:
 - Original price.
 - Converted mileage.
 - Original mileage.
+- Location, when known.
+- First seen and last seen timestamps.
+- Seller/dealer details from stored scraper metadata, when known.
+- Thumbnail image from stored scraper metadata, when known.
+- Price-change details only when stored historical price metadata supports a
+  reliable comparison.
 - Score reasons.
 
 Scheduled no-update digests send a short text message to the watch thread.
