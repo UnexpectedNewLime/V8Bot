@@ -574,6 +574,8 @@ class ListingRepository:
     ) -> None:
         """Refresh fields that can change between scrape attempts."""
 
+        updated_raw_payload = _listing_raw_payload_for_update(db_listing, listing)
+
         db_listing.external_id = listing.external_id
         db_listing.title = listing.title
         db_listing.description = listing.description
@@ -589,7 +591,7 @@ class ListingRepository:
         db_listing.score = score_result.score
         db_listing.score_reasons = score_result.reasons
         db_listing.content_hash = _content_hash(listing.title, listing.url)
-        db_listing.raw_payload = _listing_raw_payload_for_update(db_listing, listing)
+        db_listing.raw_payload = updated_raw_payload
         db_listing.last_seen_at = datetime.utcnow()
 
     def mark_listings_as_notified(self, watch_id: int, listing_ids: list[int]) -> None:
