@@ -48,7 +48,7 @@ class SourceBatchAddResult:
 
 async def _watch_id_autocomplete_choices(
     interaction: discord.Interaction,
-    current: str,
+    current: object,
     watch_service: WatchService,
 ) -> list[app_commands.Choice[int]]:
     """Return user-scoped watch choices for Discord autocomplete."""
@@ -62,7 +62,7 @@ async def _watch_id_autocomplete_choices(
         )
         return []
 
-    normalized_current = current.strip().casefold()
+    normalized_current = _normalize_autocomplete_current(current)
     choices: list[app_commands.Choice[int]] = []
     for summary in summaries:
         search_text = _watch_choice_search_text(summary)
@@ -81,7 +81,7 @@ async def _watch_id_autocomplete_choices(
 
 async def _source_id_autocomplete_choices(
     interaction: discord.Interaction,
-    current: str,
+    current: object,
     source_service: SourceService,
 ) -> list[app_commands.Choice[int]]:
     """Return source choices scoped to the selected owned watch."""
@@ -107,7 +107,7 @@ async def _source_id_autocomplete_choices(
         )
         return []
 
-    normalized_current = current.strip().casefold()
+    normalized_current = _normalize_autocomplete_current(current)
     choices: list[app_commands.Choice[int]] = []
     for summary in summaries:
         search_text = _source_choice_search_text(summary)
@@ -225,7 +225,7 @@ def register_commands(
 
     async def watch_id_autocomplete(
         interaction: discord.Interaction,
-        current: str,
+        current: object,
     ) -> list[app_commands.Choice[int]]:
         return await _watch_id_autocomplete_choices(
             interaction,
@@ -235,7 +235,7 @@ def register_commands(
 
     async def source_id_autocomplete(
         interaction: discord.Interaction,
-        current: str,
+        current: object,
     ) -> list[app_commands.Choice[int]]:
         return await _source_id_autocomplete_choices(
             interaction,
@@ -953,6 +953,14 @@ def _namespace_int(interaction: discord.Interaction, name: str) -> int | None:
         return int(value_text)
     except ValueError:
         return None
+
+
+def _normalize_autocomplete_current(current: object) -> str:
+    """Normalize Discord autocomplete input for case-insensitive matching."""
+
+    if current is None:
+        return ""
+    return str(current).strip().casefold()
 
 
 def _watch_choice_search_text(summary: WatchSummary) -> str:

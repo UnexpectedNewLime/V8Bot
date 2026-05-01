@@ -126,6 +126,27 @@ def test_watch_id_autocomplete_choices_are_user_scoped(
     assert choices[0].name.startswith(f"#{c5_watch.watch_id} C5 Corvette")
 
 
+def test_watch_id_autocomplete_accepts_numeric_current(db_session_factory) -> None:
+    watch_service = WatchService(db_session_factory)
+    watch = watch_service.create_watch(
+        discord_user_id="123",
+        car_query="C5 Corvette",
+        keywords="manual",
+        exclude_keywords="",
+        notify_time="09:30",
+    )
+
+    choices = asyncio.run(
+        _watch_id_autocomplete_choices(
+            _interaction("123"),
+            watch.watch_id,
+            watch_service,
+        )
+    )
+
+    assert [choice.value for choice in choices] == [watch.watch_id]
+
+
 def test_watch_id_autocomplete_limits_choices(db_session_factory) -> None:
     watch_service = WatchService(db_session_factory)
     for index in range(30):
@@ -189,6 +210,39 @@ def test_source_id_autocomplete_uses_selected_watch() -> None:
     assert source_service.calls == [("123", 42)]
     assert [choice.value for choice in choices] == [8]
     assert choices[0].name == "#8 Example Cars (custom_website, example.test)"
+
+
+def test_source_id_autocomplete_accepts_numeric_current() -> None:
+    class FakeSourceService:
+        def list_sources_for_watch(
+            self,
+            discord_user_id: str,
+            watch_id: int,
+        ) -> list[SourceSummary]:
+            return [
+                SourceSummary(
+                    source_id=7,
+                    name="AutoTempest",
+                    kind="autotempest",
+                    base_url="https://www.autotempest.com/results?make=chevrolet",
+                ),
+                SourceSummary(
+                    source_id=8,
+                    name="Example Cars",
+                    kind="custom_website",
+                    base_url="https://example.test/cars",
+                ),
+            ]
+
+    choices = asyncio.run(
+        _source_id_autocomplete_choices(
+            _interaction("123", watch_id=42),
+            7,
+            FakeSourceService(),
+        )
+    )
+
+    assert [choice.value for choice in choices] == [7]
 
 
 def test_source_id_autocomplete_waits_for_watch_selection() -> None:
