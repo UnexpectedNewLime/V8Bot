@@ -17,40 +17,6 @@ Current source status:
 - Carsales still needs a concrete target URL before implementation.
 - Facebook Marketplace is not supported in the MVP.
 
-## Getting Started For Development
-
-Use Python 3.11+.
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-```
-
-Edit `.env` before starting the bot:
-
-```text
-DISCORD_BOT_TOKEN=<your bot token>
-DISCORD_GUILD_ID=<your test server id>
-DATABASE_URL=sqlite:///./car_watch_bot.sqlite3
-DEFAULT_TIMEZONE=Australia/Sydney
-DEFAULT_CURRENCY=AUD
-DEFAULT_DISTANCE_UNIT=km
-USD_TO_AUD_RATE=1.50
-SCRAPE_INTERVAL_MINUTES=60
-DIGEST_POLL_INTERVAL_MINUTES=1
-SCRAPER_USER_AGENT=V8Bot/0.1 (+local manual testing)
-SCRAPER_TIMEOUT_SECONDS=10
-SCRAPER_MIN_INTERVAL_SECONDS=2
-LOG_LEVEL=INFO
-```
-
-`DISCORD_GUILD_ID` is optional, but strongly recommended for development
-because guild slash commands sync much faster than global slash commands.
-
-Never commit `.env`. It contains secrets and local runtime settings.
-
 ## Create A Discord Bot Token
 
 In the Discord Developer Portal:
@@ -59,7 +25,7 @@ In the Discord Developer Portal:
 2. Open **Bot**.
 3. Select **Create Bot** if a bot does not exist yet.
 4. Copy the **Bot Token**.
-5. Paste it into `.env` as `DISCORD_BOT_TOKEN`.
+5. Keep it ready for `DISCORD_BOT_TOKEN` in `.env`.
 
 Then invite the bot to your test server:
 
@@ -87,9 +53,127 @@ Copy the server ID:
 
 1. Right-click your server icon in the left sidebar.
 2. Click **Copy Server ID**.
-3. Paste it into `.env` as `DISCORD_GUILD_ID`.
+3. Keep it ready for `DISCORD_GUILD_ID` in `.env`.
 
-## Run The Bot Locally
+## Development Setup
+
+Podman is the default way to run V8Bot locally or on a small host. The compose
+setup uses Python 3.11, installs `requirements.txt`, loads configuration from
+`.env`, and stores SQLite data in `./data` on the host. It requires Podman and
+`podman-compose`.
+
+Run the setup script from the repository root:
+
+```bash
+scripts/setup_dev.sh
+```
+
+The script creates `data/`, copies `.env.example` to `.env` when `.env` does
+not already exist, checks for Podman tooling, and prints the next run commands.
+
+If the script fails with a permission error, make it executable and run it
+again:
+
+```bash
+chmod +x scripts/setup_dev.sh
+scripts/setup_dev.sh
+```
+
+If the script cannot be used, run the manual prep:
+
+```bash
+mkdir -p data
+cp .env.example .env
+```
+
+Only run the copy command when `.env` does not already exist.
+
+Edit `.env` before starting the bot. Set at least:
+
+```text
+DISCORD_BOT_TOKEN=<your bot token>
+DISCORD_GUILD_ID=<your test server id>
+```
+
+The copied `.env.example` includes the rest of the supported local settings.
+
+In Compose, `DATABASE_URL` is overridden to:
+
+```text
+sqlite:////data/car_watch_bot.sqlite3
+```
+
+This maps to `./data/car_watch_bot.sqlite3` on the host.
+
+Build and start:
+
+```bash
+podman-compose build
+podman-compose up -d
+```
+
+View status and logs:
+
+```bash
+podman ps
+podman-compose logs -f car-watch-bot
+```
+
+Stop the bot:
+
+```bash
+podman-compose down
+```
+
+For the Prod Server to update after `git pull`:
+
+```bash
+git pull
+podman-compose build
+podman-compose up -d
+podman-compose logs -f car-watch-bot
+```
+
+The default compose file is rootless-Podman friendly. It uses the `:U` volume
+flag so the non-root container user can write the SQLite database under
+`./data`.
+
+Persistent data:
+
+- SQLite database: `./data/car_watch_bot.sqlite3`
+- Application logs: stdout/stderr via `podman-compose logs`
+
+No ports are exposed. Discord bots connect outbound to Discord.
+
+On older Podman versions, you may see a CNI firewall config warning. If the
+container starts, connects to Discord, and writes the SQLite database, that
+warning is not blocking runtime.
+
+On SELinux-enabled hosts, create an untracked local override so Podman also
+relabels the bind mount:
+
+```yaml
+services:
+  car-watch-bot:
+    volumes:
+      - ./data:/data:Z,U
+```
+
+`DISCORD_GUILD_ID` is optional, but strongly recommended for development
+because guild slash commands sync much faster than global slash commands.
+
+Never commit `.env`. It contains secrets and local runtime settings.
+
+## Run The Bot Without Containers
+
+Use Python 3.11+.
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+```
 
 Start the bot:
 
@@ -291,104 +375,6 @@ select id, name, kind, base_url, is_active from sources;
 select id, title, url, price_amount, mileage_value, location_text, first_seen_at, last_seen_at
 from listings;
 ```
-
-## Podman Deployment
-
-Podman is the default container engine for local or Proxmox-style deployment.
-The setup uses Python 3.11, installs `requirements.txt`, loads configuration
-from `.env`, and stores SQLite data in `./data` on the host.
-
-The default compose file is rootless-Podman friendly. It uses the `:U` volume
-flag so the non-root container user can write the SQLite database under
-`./data`.
-
-On SELinux-enabled hosts, create an untracked local override so Podman also
-relabels the bind mount:
-
-```yaml
-services:
-  car-watch-bot:
-    volumes:
-      - ./data:/data:Z,U
-```
-
-Prepare:
-
-```bash
-mkdir -p data
-cp .env.example .env
-```
-
-Set at least:
-
-```text
-DISCORD_BOT_TOKEN=<prod bot token>
-DISCORD_GUILD_ID=<prod or test server id>
-```
-
-In Compose, `DATABASE_URL` is overridden to:
-
-```text
-sqlite:////data/car_watch_bot.sqlite3
-```
-
-This maps to `./data/car_watch_bot.sqlite3` on the host.
-
-Build:
-
-```bash
-podman-compose build
-```
-
-Start:
-
-```bash
-podman-compose up -d
-```
-
-View status:
-
-```bash
-podman ps
-```
-
-View logs:
-
-```bash
-podman-compose logs -f car-watch-bot
-```
-
-Stop:
-
-```bash
-podman-compose down
-```
-
-Update after `git pull`:
-
-```bash
-git pull
-podman-compose build
-podman-compose up -d
-podman-compose logs -f car-watch-bot
-```
-
-Verify persistence:
-
-```bash
-sqlite3 data/car_watch_bot.sqlite3 ".tables"
-```
-
-Persistent data:
-
-- SQLite database: `./data/car_watch_bot.sqlite3`
-- Application logs: stdout/stderr via `podman-compose logs`
-
-No ports are exposed. Discord bots connect outbound to Discord.
-
-On older Podman versions, you may see a CNI firewall config warning. If the
-container starts, connects to Discord, and writes the SQLite database, that
-warning is not blocking runtime.
 
 ## Docker Deployment
 
