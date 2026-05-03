@@ -375,13 +375,18 @@ async def handle_unstar_listing_confirmation(
     """Apply a confirmed starred-listing removal."""
 
     listing_service = _listing_service_from_interaction(interaction)
-    if listing_service is None:
-        logger.error("listing unstar missing listing service")
+    watch_service = _watch_service_from_interaction(interaction)
+    if listing_service is None or watch_service is None:
+        logger.error("listing unstar missing listing or watch service")
         await _send_ephemeral_response(interaction, "listing actions are unavailable")
         return
 
     try:
-        listing_service.unstar_watch_listing(
+        target = watch_service.get_delivery_target(
+            discord_user_id=str(interaction.user.id),
+            watch_id=watch_id,
+        )
+        result = listing_service.unstar_watch_listing(
             discord_user_id=str(interaction.user.id),
             watch_id=watch_id,
             listing_id=listing_id,
@@ -408,11 +413,28 @@ async def handle_unstar_listing_confirmation(
         await _send_ephemeral_response(interaction, "failed to unstar listing")
         return
 
+    message_to_delete = await _resolve_starred_message_for_unstar(
+        interaction=interaction,
+        clicked_message=starred_message,
+        starred_thread_id=target.starred_thread_id,
+        starred_message_id=result.starred_message_id,
+    )
     message_deleted = await _delete_listing_message(
-        listing_message=starred_message,
+        listing_message=message_to_delete,
         watch_id=watch_id,
         listing_id=listing_id,
     )
+    if not _is_starred_message(
+        message=starred_message,
+        starred_thread_id=target.starred_thread_id,
+        starred_message_id=result.starred_message_id,
+    ):
+        await _edit_listing_message_view(
+            listing_message=starred_message,
+            view=build_listing_action_view(watch_id, listing_id),
+            watch_id=watch_id,
+            listing_id=listing_id,
+        )
     if message_deleted:
         confirmation = f"Listing {listing_id} unstarred."
     else:
@@ -446,11 +468,23 @@ async def _handle_star_listing_interaction(
 
     starred_message: discord.Message | None = None
     try:
-        listing_service.get_watch_listing_status(
+        status_result = listing_service.get_watch_listing_status(
             discord_user_id=str(interaction.user.id),
             watch_id=watch_id,
             listing_id=listing_id,
         )
+        if status_result.status == LISTING_STATUS_STARRED:
+            await _edit_listing_message_view(
+                listing_message=getattr(interaction, "message", None),
+                view=build_starred_listing_action_view(watch_id, listing_id),
+                watch_id=watch_id,
+                listing_id=listing_id,
+            )
+            await _send_ephemeral_response(
+                interaction,
+                f"Listing {listing_id} is already starred.",
+            )
+            return
         target = watch_service.get_delivery_target(
             discord_user_id=str(interaction.user.id),
             watch_id=watch_id,
@@ -474,6 +508,13 @@ async def _handle_star_listing_interaction(
             watch_id=watch_id,
             listing_id=listing_id,
             status=spec.status,
+            starred_message_id=_message_id(starred_message),
+        )
+        await _edit_listing_message_view(
+            listing_message=getattr(interaction, "message", None),
+            view=build_starred_listing_action_view(watch_id, listing_id),
+            watch_id=watch_id,
+            listing_id=listing_id,
         )
     except (WatchNotFoundError, WatchListingNotFoundError):
         if starred_message is not None:
@@ -609,6 +650,126 @@ async def _send_starred_listing_message(
     else:
         send_kwargs["content"] = f"Starred listing {listing_id}."
     return await starred_thread.send(**send_kwargs)
+
+
+async def _resolve_starred_message_for_unstar(
+    *,
+    interaction: discord.Interaction,
+    clicked_message: discord.Message | None,
+    starred_thread_id: str | None,
+    starred_message_id: str | None,
+) -> discord.Message | None:
+    """Return the starred-thread copy that should be deleted for Unstar."""
+
+    if _message_matches_id(clicked_message, starred_message_id):
+        return clicked_message
+    if starred_thread_id is None or starred_message_id is None:
+        if (
+            starred_thread_id is not None
+            and _message_channel_id(clicked_message) == starred_thread_id
+        ):
+            return clicked_message
+        return None
+    return await _fetch_message(
+        interaction.client,
+        channel_id=starred_thread_id,
+        message_id=starred_message_id,
+    )
+
+
+async def _fetch_message(
+    client: discord.Client,
+    *,
+    channel_id: str,
+    message_id: str,
+) -> discord.Message | None:
+    """Fetch a Discord message by channel and message id when possible."""
+
+    try:
+        channel = client.get_channel(int(channel_id))
+        if channel is None:
+            channel = await client.fetch_channel(int(channel_id))
+        fetch_message = getattr(channel, "fetch_message", None)
+        if fetch_message is None:
+            return None
+        return await fetch_message(int(message_id))
+    except (ValueError, LookupError, discord.NotFound, discord.Forbidden):
+        return None
+    except Exception:
+        logger.exception(
+            "failed to fetch starred listing message channel_id=%s message_id=%s",
+            channel_id,
+            message_id,
+        )
+        return None
+
+
+async def _edit_listing_message_view(
+    *,
+    listing_message: discord.Message | None,
+    view: discord.ui.View,
+    watch_id: int,
+    listing_id: int,
+) -> bool:
+    """Swap listing action buttons on an existing Discord message."""
+
+    edit = getattr(listing_message, "edit", None)
+    if edit is None:
+        return False
+    try:
+        await edit(view=view)
+    except (discord.NotFound, discord.Forbidden):
+        logger.info(
+            "listing message already gone or not editable watch_id=%s listing_id=%s",
+            watch_id,
+            listing_id,
+        )
+        return False
+    except Exception:
+        logger.exception(
+            "failed to edit listing message view watch_id=%s listing_id=%s",
+            watch_id,
+            listing_id,
+        )
+        return False
+    return True
+
+
+def _is_starred_message(
+    *,
+    message: discord.Message | None,
+    starred_thread_id: str | None,
+    starred_message_id: str | None,
+) -> bool:
+    """Return whether a clicked message is the starred-thread copy."""
+
+    return _message_matches_id(message, starred_message_id) or (
+        starred_thread_id is not None
+        and _message_channel_id(message) == starred_thread_id
+    )
+
+
+def _message_matches_id(
+    message: discord.Message | None, message_id: str | None
+) -> bool:
+    """Return whether a Discord message has the expected id."""
+
+    return message_id is not None and _message_id(message) == message_id
+
+
+def _message_id(message: discord.Message | None) -> str | None:
+    """Return a Discord message id as text when available."""
+
+    raw_message_id = getattr(message, "id", None)
+    return str(raw_message_id) if raw_message_id is not None else None
+
+
+def _message_channel_id(message: discord.Message | None) -> str | None:
+    """Return the message channel id as text when available."""
+
+    channel = getattr(message, "channel", None)
+    raw_channel_id = getattr(channel, "id", None)
+    return str(raw_channel_id) if raw_channel_id is not None else None
 
 
 async def _delete_listing_message(

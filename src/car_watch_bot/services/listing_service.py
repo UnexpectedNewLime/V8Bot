@@ -39,6 +39,7 @@ class ListingStatusUpdateResult:
     watch_id: int
     listing_id: int
     status: str
+    starred_message_id: str | None = None
 
 
 class ListingService:
@@ -170,6 +171,7 @@ class ListingService:
         watch_id: int,
         listing_id: int,
         status: str,
+        starred_message_id: str | None = None,
     ) -> ListingStatusUpdateResult:
         """Update one watch-listing status for an owning Discord user."""
 
@@ -186,6 +188,7 @@ class ListingService:
                 watch_id=watch.id,
                 listing_id=listing_id,
                 status=status,
+                starred_message_id=starred_message_id,
             )
             if watch_listing is None:
                 raise WatchListingNotFoundError("listing not found for watch")
@@ -193,6 +196,7 @@ class ListingService:
                 watch_id=watch.id,
                 listing_id=listing_id,
                 status=watch_listing.status,
+                starred_message_id=watch_listing.starred_message_id,
             )
             session.commit()
             return result
@@ -211,6 +215,14 @@ class ListingService:
             if watch is None:
                 raise WatchNotFoundError("watch not found")
             listing_repository = ListingRepository(session)
+            current_watch_listing = listing_repository.get_watch_listing_for_user(
+                user_id=user.id,
+                watch_id=watch.id,
+                listing_id=listing_id,
+            )
+            if current_watch_listing is None:
+                raise WatchListingNotFoundError("listing not found for watch")
+            starred_message_id = current_watch_listing.starred_message_id
             watch_listing = listing_repository.unstar_watch_listing_for_user(
                 user_id=user.id,
                 watch_id=watch.id,
@@ -222,6 +234,7 @@ class ListingService:
                 watch_id=watch.id,
                 listing_id=listing_id,
                 status=watch_listing.status,
+                starred_message_id=starred_message_id,
             )
             session.commit()
             return result
@@ -250,4 +263,5 @@ class ListingService:
                 watch_id=watch.id,
                 listing_id=listing_id,
                 status=watch_listing.status,
+                starred_message_id=watch_listing.starred_message_id,
             )

@@ -658,6 +658,7 @@ class ListingRepository:
         watch_id: int,
         listing_id: int,
         status: str,
+        starred_message_id: str | None = None,
     ) -> WatchListing | None:
         """Update a watch-listing status owned by a user."""
 
@@ -669,6 +670,10 @@ class ListingRepository:
         if watch_listing is None:
             return None
         watch_listing.status = status
+        if status == LISTING_STATUS_STARRED:
+            watch_listing.starred_message_id = starred_message_id
+        elif status != LISTING_STATUS_STARRED:
+            watch_listing.starred_message_id = None
         if watch_listing.sent_at is None:
             watch_listing.sent_at = datetime.utcnow()
         self.session.flush()
@@ -693,7 +698,8 @@ class ListingRepository:
             watch_listing.status = LISTING_STATUS_SENT
             if watch_listing.sent_at is None:
                 watch_listing.sent_at = datetime.utcnow()
-            self.session.flush()
+        watch_listing.starred_message_id = None
+        self.session.flush()
         return watch_listing
 
     def get_watch_listing_for_user(

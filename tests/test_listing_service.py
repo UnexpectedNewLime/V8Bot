@@ -176,7 +176,13 @@ def test_unstar_watch_listing_restores_sent_history_without_deactivating(
 ) -> None:
     test_scrape_watch_now_stores_pending_listings(db_session_factory)
     service = _listing_service(db_session_factory)
-    service.update_watch_listing_status("123", 1, 1, LISTING_STATUS_STARRED)
+    service.update_watch_listing_status(
+        "123",
+        1,
+        1,
+        LISTING_STATUS_STARRED,
+        starred_message_id="555",
+    )
 
     result = service.unstar_watch_listing("123", 1, 1)
     visible_listing_ids = [
@@ -186,9 +192,11 @@ def test_unstar_watch_listing_restores_sent_history_without_deactivating(
         row = session.scalar(select(WatchListing).where(WatchListing.listing_id == 1))
 
     assert result.status == LISTING_STATUS_SENT
+    assert result.starred_message_id == "555"
     assert visible_listing_ids == [1, 2, 3]
     assert row is not None
     assert row.status == LISTING_STATUS_SENT
+    assert row.starred_message_id is None
 
 
 def test_unstar_watch_listing_does_not_reactivate_inactive_listing(
@@ -196,7 +204,13 @@ def test_unstar_watch_listing_does_not_reactivate_inactive_listing(
 ) -> None:
     test_scrape_watch_now_stores_pending_listings(db_session_factory)
     service = _listing_service(db_session_factory)
-    service.update_watch_listing_status("123", 1, 1, LISTING_STATUS_STARRED)
+    service.update_watch_listing_status(
+        "123",
+        1,
+        1,
+        LISTING_STATUS_STARRED,
+        starred_message_id="555",
+    )
     service.update_watch_listing_status("123", 1, 1, LISTING_STATUS_INACTIVE)
 
     result = service.unstar_watch_listing("123", 1, 1)
@@ -207,9 +221,11 @@ def test_unstar_watch_listing_does_not_reactivate_inactive_listing(
         row = session.scalar(select(WatchListing).where(WatchListing.listing_id == 1))
 
     assert result.status == LISTING_STATUS_INACTIVE
+    assert result.starred_message_id is None
     assert visible_listing_ids == [2, 3]
     assert row is not None
     assert row.status == LISTING_STATUS_INACTIVE
+    assert row.starred_message_id is None
 
 
 def test_listing_status_update_is_scoped_to_owner(db_session_factory) -> None:

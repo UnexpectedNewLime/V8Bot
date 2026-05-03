@@ -246,13 +246,13 @@ Expected result:
 
 Listing action buttons update the stored watch-listing status for the user who
 owns the watch. Star copies the listing into a thread named from the normal
-watch thread with `Starred ` prefixed, with only an Unstar button, and keeps it
-visible in `/watch_listings`.
+watch thread with `Starred ` prefixed, changes the original listing buttons to
+Unstar, and keeps it visible in `/watch_listings`.
 Delete opens a confirmation modal, removes the clicked Discord message, and
 keeps the listing out of later scrape output for that watch. The delete modal
 includes an optional free-text reason field for future analytics. Unstar opens
-a confirmation modal, removes the starred-thread copy, and leaves the original
-watch-thread listing active.
+a confirmation modal, removes the starred-thread copy, restores Star and Delete
+on the original watch-thread listing, and leaves that listing active.
 
 You can also run the flow manually:
 

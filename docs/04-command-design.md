@@ -264,13 +264,15 @@ Discord user who owns the watch.
 
 Star marks the watch-listing `starred` and copies the listing embed to a
 per-watch shortlist thread named from the normal watch thread with `Starred `
-prefixed. The starred copy shows only an Unstar button. Delete opens a
-confirmation modal, then marks the watch-listing `inactive`, deletes the
-clicked Discord message, and prevents the row from becoming pending again on
-later scrapes. The delete modal includes an optional free-text reason field;
-the reason is available to the handler for logging and future analytics. Unstar
-opens a confirmation modal, removes the starred-thread copy, and restores the
-watch-listing to normal sent history without deactivating it.
+prefixed. The starred copy shows only an Unstar button, and the original
+watch-thread message switches to Unstar while starred. Repeated Star clicks do
+not create duplicate starred-thread copies. Delete opens a confirmation modal,
+then marks the watch-listing `inactive`, deletes the clicked Discord message,
+and prevents the row from becoming pending again on later scrapes. The delete
+modal includes an optional free-text reason field; the reason is available to
+the handler for logging and future analytics. Unstar opens a confirmation
+modal, removes the starred-thread copy, and restores the watch-listing to
+normal sent history without deactivating it.
 
 ## Preference Commands
 

@@ -41,6 +41,33 @@ def test_init_database_adds_thread_ids_to_existing_watch_table() -> None:
     assert "starred_thread_id" in columns
 
 
+def test_init_database_adds_starred_message_id_to_existing_watch_listing_table() -> (
+    None
+):
+    engine = create_database_engine("sqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE watch_listings ("
+                "id INTEGER PRIMARY KEY, "
+                "watch_id INTEGER NOT NULL, "
+                "listing_id INTEGER NOT NULL"
+                ")"
+            )
+        )
+
+    init_database(engine)
+
+    with engine.connect() as connection:
+        columns = {
+            row[1]
+            for row in connection.execute(
+                text("PRAGMA table_info(watch_listings)")
+            ).fetchall()
+        }
+    assert "starred_message_id" in columns
+
+
 def test_user_creation_is_idempotent(db_session) -> None:
     users = UserRepository(db_session)
 
@@ -202,7 +229,9 @@ def test_unnotified_listing_retrieval_and_mark_notified(db_session) -> None:
         included_keywords=["manual"],
     )
     source = SourceRepository(db_session).create_source(name="Mock Cars")
-    candidate = ListingCandidate(title="C5 Corvette manual", url="https://example.test/c5")
+    candidate = ListingCandidate(
+        title="C5 Corvette manual", url="https://example.test/c5"
+    )
     score = ScoreResult(score=10, is_match=True, reasons=["keyword matched: manual"])
     listings = ListingRepository(db_session)
 

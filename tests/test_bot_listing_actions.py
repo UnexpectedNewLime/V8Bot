@@ -23,7 +23,10 @@ from car_watch_bot.core.listing_status import (
     LISTING_STATUS_STARRED,
 )
 from car_watch_bot.core.models import WatchDeliveryTarget
-from car_watch_bot.services.listing_service import ListingService
+from car_watch_bot.services.listing_service import (
+    ListingService,
+    ListingStatusUpdateResult,
+)
 from car_watch_bot.services.watch_service import WatchService
 
 
@@ -95,7 +98,7 @@ def test_star_action_calls_listing_service_and_posts_to_starred_thread() -> None
         )
     )
 
-    assert listing_service.calls == [("123", 42, 7, LISTING_STATUS_STARRED)]
+    assert listing_service.calls == [("123", 42, 7, LISTING_STATUS_STARRED, "1000")]
     assert len(channel.created_threads) == 1
     assert channel.thread_kwargs[0]["name"] == "Starred V8Bot: C5 Corvette - manual #42"
     assert (
@@ -110,8 +113,47 @@ def test_star_action_calls_listing_service_and_posts_to_starred_thread() -> None
         "Unstar",
     ]
     assert watch_service.starred_thread_updates == [("123", 42, "900")]
+    assert [
+        child.item.label for child in interaction.message.edited_views[0].children
+    ] == [
+        "Unstar",
+    ]
     assert interaction.response.sent_messages == [
         ("Listing 7 starred.", True, None),
+    ]
+
+
+def test_repeated_star_action_only_updates_original_buttons() -> None:
+    listing_service = FakeListingService(
+        status=LISTING_STATUS_STARRED,
+        starred_message_id="1000",
+    )
+    channel = FakeChannel()
+    interaction = FakeInteraction(
+        listing_service=listing_service,
+        watch_service=FakeWatchService(starred_thread_id="900"),
+        channels={999: channel},
+        message=FakeListingMessage(embeds=[FakeEmbed("listing embed")]),
+    )
+
+    asyncio.run(
+        handle_listing_action_interaction(
+            interaction=interaction,
+            action="star",
+            watch_id=42,
+            listing_id=7,
+        )
+    )
+
+    assert channel.created_threads == []
+    assert listing_service.calls == []
+    assert [
+        child.item.label for child in interaction.message.edited_views[0].children
+    ] == [
+        "Unstar",
+    ]
+    assert interaction.response.sent_messages == [
+        ("Listing 7 is already starred.", True, None),
     ]
 
 
@@ -195,7 +237,7 @@ def test_delete_confirmation_inactivates_listing_and_deletes_message() -> None:
         )
     )
 
-    assert listing_service.calls == [("123", 42, 7, LISTING_STATUS_INACTIVE)]
+    assert listing_service.calls == [("123", 42, 7, LISTING_STATUS_INACTIVE, None)]
     assert listing_message.deleted is True
     assert interaction.response.sent_messages == [("Listing 7 deleted.", True, None)]
 
@@ -222,13 +264,21 @@ def test_unstar_action_opens_confirmation_modal() -> None:
     assert interaction.response.modals[0].note.required is False
 
 
-def test_unstar_confirmation_marks_sent_and_deletes_starred_message() -> None:
-    listing_service = FakeListingService()
-    starred_message = FakeListingMessage()
+def test_unstar_confirmation_from_main_deletes_starred_copy_and_restores_buttons() -> (
+    None
+):
+    listing_service = FakeListingService(
+        status=LISTING_STATUS_STARRED,
+        starred_message_id="555",
+    )
+    starred_thread = FakeThread(900)
+    starred_copy = FakeListingMessage(message_id=555, channel=starred_thread)
+    starred_thread.messages[555] = starred_copy
+    original_message = FakeListingMessage(message_id=111)
     interaction = FakeInteraction(
         listing_service=listing_service,
-        watch_service=FakeWatchService(),
-        channels={999: FakeChannel()},
+        watch_service=FakeWatchService(starred_thread_id="900"),
+        channels={900: starred_thread},
     )
 
     asyncio.run(
@@ -236,21 +286,34 @@ def test_unstar_confirmation_marks_sent_and_deletes_starred_message() -> None:
             interaction=interaction,
             watch_id=42,
             listing_id=7,
-            starred_message=starred_message,
+            starred_message=original_message,
         )
     )
 
     assert listing_service.unstar_calls == [("123", 42, 7)]
     assert listing_service.calls == []
-    assert starred_message.deleted is True
+    assert starred_copy.deleted is True
+    assert original_message.deleted is False
+    assert [
+        child.item.label for child in original_message.edited_views[0].children
+    ] == [
+        "Star",
+        "Delete",
+    ]
     assert interaction.response.sent_messages == [("Listing 7 unstarred.", True, None)]
 
 
 class FakeListingService(ListingService):
     """Listing service test double."""
 
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, int, int, str]] = []
+    def __init__(
+        self,
+        status: str = LISTING_STATUS_SENT,
+        starred_message_id: str | None = None,
+    ) -> None:
+        self.status = status
+        self.starred_message_id = starred_message_id
+        self.calls: list[tuple[str, int, int, str, str | None]] = []
         self.unstar_calls: list[tuple[str, int, int]] = []
         self.status_checks: list[tuple[str, int, int]] = []
 
@@ -259,11 +322,16 @@ class FakeListingService(ListingService):
         discord_user_id: str,
         watch_id: int,
         listing_id: int,
-    ) -> object:
+    ) -> ListingStatusUpdateResult:
         """Record a status lookup."""
 
         self.status_checks.append((discord_user_id, watch_id, listing_id))
-        return object()
+        return ListingStatusUpdateResult(
+            watch_id=watch_id,
+            listing_id=listing_id,
+            status=self.status,
+            starred_message_id=self.starred_message_id,
+        )
 
     def update_watch_listing_status(
         self,
@@ -271,29 +339,49 @@ class FakeListingService(ListingService):
         watch_id: int,
         listing_id: int,
         status: str,
-    ) -> object:
+        starred_message_id: str | None = None,
+    ) -> ListingStatusUpdateResult:
         """Record a status update."""
 
-        self.calls.append((discord_user_id, watch_id, listing_id, status))
-        return object()
+        self.calls.append(
+            (discord_user_id, watch_id, listing_id, status, starred_message_id)
+        )
+        self.status = status
+        self.starred_message_id = starred_message_id
+        return ListingStatusUpdateResult(
+            watch_id=watch_id,
+            listing_id=listing_id,
+            status=status,
+            starred_message_id=starred_message_id,
+        )
 
     def unstar_watch_listing(
         self,
         discord_user_id: str,
         watch_id: int,
         listing_id: int,
-    ) -> object:
+    ) -> ListingStatusUpdateResult:
         """Record an unstar update."""
 
         self.unstar_calls.append((discord_user_id, watch_id, listing_id))
-        return object()
+        starred_message_id = self.starred_message_id
+        if self.status == LISTING_STATUS_STARRED:
+            self.status = LISTING_STATUS_SENT
+        self.starred_message_id = None
+        return ListingStatusUpdateResult(
+            watch_id=watch_id,
+            listing_id=listing_id,
+            status=self.status,
+            starred_message_id=starred_message_id,
+        )
 
 
 class FakeWatchService(WatchService):
     """Watch service test double."""
 
-    def __init__(self) -> None:
+    def __init__(self, starred_thread_id: str | None = None) -> None:
         self.starred_thread_updates: list[tuple[str, int, str | None]] = []
+        self.starred_thread_id = starred_thread_id
 
     def get_delivery_target(
         self,
@@ -309,7 +397,7 @@ class FakeWatchService(WatchService):
             included_keywords=["manual"],
             channel_id="999",
             thread_id=None,
-            starred_thread_id=None,
+            starred_thread_id=self.starred_thread_id,
         )
 
     def set_starred_thread_id(
@@ -321,6 +409,7 @@ class FakeWatchService(WatchService):
         """Record starred thread persistence."""
 
         self.starred_thread_updates.append((discord_user_id, watch_id, thread_id))
+        self.starred_thread_id = thread_id
         return self.get_delivery_target(discord_user_id, watch_id)
 
 
@@ -389,6 +478,7 @@ class FakeThread:
         self.id = thread_id
         self.send_fails = send_fails
         self.sent_messages: list[dict[str, object]] = []
+        self.messages: dict[int, object] = {}
 
     async def send(self, **kwargs: object) -> object:
         """Record a thread send."""
@@ -396,20 +486,44 @@ class FakeThread:
         if self.send_fails:
             raise RuntimeError("send failed")
         self.sent_messages.append(kwargs)
-        return FakeListingMessage()
+        message = FakeListingMessage(
+            message_id=1000 + len(self.sent_messages) - 1,
+            channel=self,
+        )
+        self.messages[message.id] = message
+        return message
+
+    async def fetch_message(self, message_id: int) -> object:
+        """Fetch a sent fake message."""
+
+        return self.messages[message_id]
 
 
 class FakeListingMessage:
     """Discord listing message test double."""
 
-    def __init__(self, embeds: list[object] | None = None) -> None:
+    def __init__(
+        self,
+        embeds: list[object] | None = None,
+        message_id: int = 100,
+        channel: object | None = None,
+    ) -> None:
+        self.id = message_id
+        self.channel = channel
         self.embeds = embeds or []
         self.deleted = False
+        self.edited_views: list[object] = []
 
     async def delete(self) -> None:
         """Record message deletion."""
 
         self.deleted = True
+
+    async def edit(self, **kwargs: object) -> None:
+        """Record message edits."""
+
+        if "view" in kwargs:
+            self.edited_views.append(kwargs["view"])
 
 
 class FakeEmbed:

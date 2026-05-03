@@ -178,6 +178,8 @@ Fields:
   `inactive`. Older local rows may still contain legacy action states such as
   `saved`, `contacted`, `dismissed`, or `not_relevant`.
 - `sent_at`.
+- `starred_message_id`: Discord message id for the copied shortlist listing,
+  nullable.
 
 Constraints:
 
