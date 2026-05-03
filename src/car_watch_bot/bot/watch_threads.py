@@ -8,7 +8,6 @@ import discord
 
 from car_watch_bot.core.models import WatchDeliveryTarget
 
-
 logger = logging.getLogger(__name__)
 DISCORD_THREAD_NAME_LIMIT = 100
 
@@ -20,7 +19,9 @@ def build_watch_thread_name(target: WatchDeliveryTarget) -> str:
     query = _clean_name_part(target.watch_query)
     if query and query.casefold() != pieces[0].casefold():
         pieces.append(query)
-    keyword_text = _keyword_text(target.included_keywords, existing_text=" ".join(pieces))
+    keyword_text = _keyword_text(
+        target.included_keywords, existing_text=" ".join(pieces)
+    )
     if keyword_text:
         pieces.append(keyword_text)
     base_name = " - ".join(part for part in pieces if part)
@@ -31,11 +32,12 @@ def build_watch_thread_name(target: WatchDeliveryTarget) -> str:
 def build_starred_watch_thread_name(target: WatchDeliveryTarget) -> str:
     """Build the Discord thread name for a watch's starred shortlist."""
 
-    name = _clean_name_part(target.watch_name or target.watch_query)
-    return _truncate_thread_name(f"Starred {name}")
+    return _truncate_thread_name(f"Starred {build_watch_thread_name(target)}")
 
 
-async def resolve_watch_thread(client: discord.Client, target: WatchDeliveryTarget) -> Any:
+async def resolve_watch_thread(
+    client: discord.Client, target: WatchDeliveryTarget
+) -> Any:
     """Return an existing or newly-created Discord thread for a watch target."""
 
     stored_thread = await _fetch_stored_thread(client, target.thread_id)

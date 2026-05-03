@@ -11,6 +11,7 @@ import discord
 from car_watch_bot.bot.watch_threads import resolve_starred_watch_thread
 from car_watch_bot.core.listing_status import (
     LISTING_STATUS_INACTIVE,
+    LISTING_STATUS_SENT,
     LISTING_STATUS_STARRED,
 )
 from car_watch_bot.services.listing_service import (
@@ -24,14 +25,15 @@ from car_watch_bot.services.watch_service import (
     WatchValidationError,
 )
 
-
 logger = logging.getLogger(__name__)
 
 LISTING_ACTION_CUSTOM_ID_PREFIX = "v8bot:listing-action"
 LISTING_ACTION_NAMES = ("star", "delete")
+STARRED_LISTING_ACTION_NAMES = ("unstar",)
+ALL_LISTING_ACTION_NAMES = (*LISTING_ACTION_NAMES, *STARRED_LISTING_ACTION_NAMES)
 LISTING_ACTION_CUSTOM_ID_PATTERN = re.compile(
     rf"^{LISTING_ACTION_CUSTOM_ID_PREFIX}:"
-    rf"(?P<action>{'|'.join(LISTING_ACTION_NAMES)}):"
+    rf"(?P<action>{'|'.join(ALL_LISTING_ACTION_NAMES)}):"
     r"(?P<watch_id>[0-9]+):(?P<listing_id>[0-9]+)$"
 )
 
@@ -68,6 +70,12 @@ LISTING_ACTION_SPECS: dict[str, ListingActionSpec] = {
         style=discord.ButtonStyle.danger,
         confirmation="deleted",
     ),
+    "unstar": ListingActionSpec(
+        label="Unstar",
+        status=LISTING_STATUS_SENT,
+        style=discord.ButtonStyle.secondary,
+        confirmation="unstarred",
+    ),
 }
 
 
@@ -77,6 +85,15 @@ class ListingActionView(discord.ui.View):
     def __init__(self, watch_id: int, listing_id: int) -> None:
         super().__init__(timeout=None)
         for action in LISTING_ACTION_NAMES:
+            self.add_item(ListingActionDynamicItem(action, watch_id, listing_id))
+
+
+class StarredListingActionView(discord.ui.View):
+    """Persistent view containing starred-listing action buttons."""
+
+    def __init__(self, watch_id: int, listing_id: int) -> None:
+        super().__init__(timeout=None)
+        for action in STARRED_LISTING_ACTION_NAMES:
             self.add_item(ListingActionDynamicItem(action, watch_id, listing_id))
 
 
@@ -126,8 +143,8 @@ class ListingActionDynamicItem(
         )
 
 
-class DeleteListingConfirmationView(discord.ui.View):
-    """Ephemeral confirmation controls for deleting one listing message."""
+class DeleteListingConfirmationModal(discord.ui.Modal):
+    """Modal confirmation for deleting one listing message."""
 
     def __init__(
         self,
@@ -135,17 +152,19 @@ class DeleteListingConfirmationView(discord.ui.View):
         listing_id: int,
         listing_message: discord.Message | None,
     ) -> None:
-        super().__init__(timeout=60)
+        super().__init__(title=f"Delete listing {listing_id}")
         self.watch_id = watch_id
         self.listing_id = listing_id
         self.listing_message = listing_message
+        self.delete_reason = discord.ui.TextInput(
+            label="Delete reason (optional)",
+            placeholder="Submit confirms. Cancel keeps the listing.",
+            required=False,
+            max_length=240,
+        )
+        self.add_item(self.delete_reason)
 
-    @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger)
-    async def confirm_delete(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button,
-    ) -> None:
+    async def on_submit(self, interaction: discord.Interaction) -> None:
         """Confirm deletion of the listing row and Discord message."""
 
         await handle_delete_listing_confirmation(
@@ -153,20 +172,46 @@ class DeleteListingConfirmationView(discord.ui.View):
             watch_id=self.watch_id,
             listing_id=self.listing_id,
             listing_message=self.listing_message,
+            delete_reason=self.delete_reason_value,
         )
 
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
-    async def cancel_delete(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button,
-    ) -> None:
-        """Cancel a pending listing deletion."""
+    @property
+    def delete_reason_value(self) -> str | None:
+        """Return the optional user-provided delete reason."""
 
-        await _edit_or_send_ephemeral_response(
-            interaction,
-            "Delete cancelled.",
-            view=None,
+        reason = self.delete_reason.value.strip()
+        return reason or None
+
+
+class UnstarListingConfirmationModal(discord.ui.Modal):
+    """Modal confirmation for removing one starred-listing message."""
+
+    def __init__(
+        self,
+        watch_id: int,
+        listing_id: int,
+        starred_message: discord.Message | None,
+    ) -> None:
+        super().__init__(title=f"Unstar listing {listing_id}")
+        self.watch_id = watch_id
+        self.listing_id = listing_id
+        self.starred_message = starred_message
+        self.note = discord.ui.TextInput(
+            label="Confirm unstar",
+            placeholder="Submit confirms. Cancel keeps the starred copy.",
+            required=False,
+            max_length=100,
+        )
+        self.add_item(self.note)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        """Confirm removal of the starred copy."""
+
+        await handle_unstar_listing_confirmation(
+            interaction=interaction,
+            watch_id=self.watch_id,
+            listing_id=self.listing_id,
+            starred_message=self.starred_message,
         )
 
 
@@ -174,6 +219,15 @@ def build_listing_action_view(watch_id: int, listing_id: int) -> ListingActionVi
     """Build a persistent action view for one watch listing."""
 
     return ListingActionView(watch_id=watch_id, listing_id=listing_id)
+
+
+def build_starred_listing_action_view(
+    watch_id: int,
+    listing_id: int,
+) -> StarredListingActionView:
+    """Build a persistent action view for one starred watch listing."""
+
+    return StarredListingActionView(watch_id=watch_id, listing_id=listing_id)
 
 
 def build_listing_action_custom_id(action: str, watch_id: int, listing_id: int) -> str:
@@ -213,6 +267,13 @@ async def handle_listing_action_interaction(
             listing_id=listing_id,
         )
         return
+    if action == "unstar":
+        await _send_unstar_confirmation(
+            interaction=interaction,
+            watch_id=watch_id,
+            listing_id=listing_id,
+        )
+        return
     if action != "star":
         await _send_ephemeral_response(interaction, "listing action is not supported")
         return
@@ -230,16 +291,16 @@ async def handle_delete_listing_confirmation(
     watch_id: int,
     listing_id: int,
     listing_message: discord.Message | None,
+    delete_reason: str | None = None,
 ) -> None:
     """Apply a confirmed listing delete action."""
 
     listing_service = _listing_service_from_interaction(interaction)
     if listing_service is None:
         logger.error("listing delete missing listing service")
-        await _edit_or_send_ephemeral_response(
+        await _send_ephemeral_response(
             interaction,
             "listing actions are unavailable",
-            view=None,
         )
         return
 
@@ -257,18 +318,16 @@ async def handle_delete_listing_confirmation(
             watch_id,
             listing_id,
         )
-        await _edit_or_send_ephemeral_response(
+        await _send_ephemeral_response(
             interaction,
             "listing not found or not owned by you",
-            view=None,
         )
         return
     except ListingStatusValidationError:
         logger.info("listing delete validation failed")
-        await _edit_or_send_ephemeral_response(
+        await _send_ephemeral_response(
             interaction,
             "listing action is not supported",
-            view=None,
         )
         return
     except Exception:
@@ -278,10 +337,9 @@ async def handle_delete_listing_confirmation(
             watch_id,
             listing_id,
         )
-        await _edit_or_send_ephemeral_response(
+        await _send_ephemeral_response(
             interaction,
             "failed to delete listing",
-            view=None,
         )
         return
 
@@ -302,8 +360,71 @@ async def handle_delete_listing_confirmation(
         watch_id,
         listing_id,
         message_deleted,
+        extra={"delete_reason": delete_reason},
     )
-    await _edit_or_send_ephemeral_response(interaction, confirmation, view=None)
+    await _send_ephemeral_response(interaction, confirmation)
+
+
+async def handle_unstar_listing_confirmation(
+    *,
+    interaction: discord.Interaction,
+    watch_id: int,
+    listing_id: int,
+    starred_message: discord.Message | None,
+) -> None:
+    """Apply a confirmed starred-listing removal."""
+
+    listing_service = _listing_service_from_interaction(interaction)
+    if listing_service is None:
+        logger.error("listing unstar missing listing service")
+        await _send_ephemeral_response(interaction, "listing actions are unavailable")
+        return
+
+    try:
+        listing_service.unstar_watch_listing(
+            discord_user_id=str(interaction.user.id),
+            watch_id=watch_id,
+            listing_id=listing_id,
+        )
+    except (WatchNotFoundError, WatchListingNotFoundError):
+        logger.info(
+            "listing unstar rejected user_id=%s watch_id=%s listing_id=%s",
+            interaction.user.id,
+            watch_id,
+            listing_id,
+        )
+        await _send_ephemeral_response(
+            interaction,
+            "listing not found or not owned by you",
+        )
+        return
+    except Exception:
+        logger.exception(
+            "listing unstar failed user_id=%s watch_id=%s listing_id=%s",
+            interaction.user.id,
+            watch_id,
+            listing_id,
+        )
+        await _send_ephemeral_response(interaction, "failed to unstar listing")
+        return
+
+    message_deleted = await _delete_listing_message(
+        listing_message=starred_message,
+        watch_id=watch_id,
+        listing_id=listing_id,
+    )
+    if message_deleted:
+        confirmation = f"Listing {listing_id} unstarred."
+    else:
+        confirmation = f"Listing {listing_id} unstarred, but I could not remove the starred message."
+    logger.info(
+        "listing unstar applied user_id=%s watch_id=%s listing_id=%s message_deleted=%s",
+        interaction.user.id,
+        watch_id,
+        listing_id,
+        message_deleted,
+    )
+    await _send_ephemeral_response(interaction, confirmation)
 
 
 async def _handle_star_listing_interaction(
@@ -410,16 +531,28 @@ async def _send_delete_confirmation(
 ) -> None:
     """Ask the user to confirm a destructive listing action."""
 
-    await _send_ephemeral_response(
-        interaction,
-        (
-            f"Delete listing {listing_id}? This removes this Discord message and "
-            "keeps the listing out of future scrapes."
-        ),
-        view=DeleteListingConfirmationView(
+    await interaction.response.send_modal(
+        DeleteListingConfirmationModal(
             watch_id=watch_id,
             listing_id=listing_id,
             listing_message=getattr(interaction, "message", None),
+        ),
+    )
+
+
+async def _send_unstar_confirmation(
+    *,
+    interaction: discord.Interaction,
+    watch_id: int,
+    listing_id: int,
+) -> None:
+    """Ask the user to confirm removal from the starred shortlist."""
+
+    await interaction.response.send_modal(
+        UnstarListingConfirmationModal(
+            watch_id=watch_id,
+            listing_id=listing_id,
+            starred_message=getattr(interaction, "message", None),
         ),
     )
 
@@ -434,7 +567,7 @@ async def _send_starred_listing_message(
     """Copy the clicked listing message into the starred shortlist thread."""
 
     send_kwargs: dict[str, object] = {
-        "view": build_listing_action_view(watch_id, listing_id),
+        "view": build_starred_listing_action_view(watch_id, listing_id),
         "silent": True,
     }
     source_message = getattr(interaction, "message", None)
@@ -507,21 +640,11 @@ async def _send_ephemeral_response(
 ) -> None:
     """Send one ephemeral response for a component interaction."""
 
+    response_kwargs: dict[str, object] = {"ephemeral": True}
+    if view is not None:
+        response_kwargs["view"] = view
+
     if interaction.response.is_done():
-        await interaction.followup.send(message, ephemeral=True, view=view)
+        await interaction.followup.send(message, **response_kwargs)
         return
-    await interaction.response.send_message(message, ephemeral=True, view=view)
-
-
-async def _edit_or_send_ephemeral_response(
-    interaction: discord.Interaction,
-    message: str,
-    view: discord.ui.View | None,
-) -> None:
-    """Edit a component response when possible, otherwise send a new response."""
-
-    edit_message = getattr(interaction.response, "edit_message", None)
-    if edit_message is not None and not interaction.response.is_done():
-        await edit_message(content=message, view=view)
-        return
-    await _send_ephemeral_response(interaction, message, view=view)
+    await interaction.response.send_message(message, **response_kwargs)

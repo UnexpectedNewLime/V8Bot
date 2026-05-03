@@ -5,7 +5,10 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from car_watch_bot.core.listing_status import USER_SETTABLE_LISTING_STATUSES
+from car_watch_bot.core.listing_status import (
+    LISTING_STATUS_SENT,
+    USER_SETTABLE_LISTING_STATUSES,
+)
 from car_watch_bot.core.models import DigestListing, ScrapeNowResult
 from car_watch_bot.db.repositories import (
     ListingRepository,
@@ -184,6 +187,36 @@ class ListingService:
                 watch_id=watch.id,
                 listing_id=listing_id,
                 status=status,
+            )
+            if watch_listing is None:
+                raise WatchListingNotFoundError("listing not found for watch")
+            result = ListingStatusUpdateResult(
+                watch_id=watch.id,
+                listing_id=listing_id,
+                status=watch_listing.status,
+            )
+            session.commit()
+            return result
+
+    def unstar_watch_listing(
+        self,
+        discord_user_id: str,
+        watch_id: int,
+        listing_id: int,
+    ) -> ListingStatusUpdateResult:
+        """Remove one watch listing from the starred shortlist."""
+
+        with self.session_factory() as session:
+            user = UserRepository(session).get_or_create_by_discord_id(discord_user_id)
+            watch = WatchRepository(session).get_active_for_user(watch_id, user.id)
+            if watch is None:
+                raise WatchNotFoundError("watch not found")
+            listing_repository = ListingRepository(session)
+            watch_listing = listing_repository.update_watch_listing_status_for_user(
+                user_id=user.id,
+                watch_id=watch.id,
+                listing_id=listing_id,
+                status=LISTING_STATUS_SENT,
             )
             if watch_listing is None:
                 raise WatchListingNotFoundError("listing not found for watch")

@@ -89,10 +89,10 @@ def test_build_watch_thread_name_is_meaningful_and_stable() -> None:
     assert name == "V8Bot: C5 Corvette - manual targa #42"
 
 
-def test_build_starred_watch_thread_name_uses_requested_title() -> None:
+def test_build_starred_watch_thread_name_prefixes_watch_thread_name() -> None:
     name = build_starred_watch_thread_name(_target())
 
-    assert name == "Starred C5 Corvette"
+    assert name == "Starred V8Bot: C5 Corvette - manual targa #42"
 
 
 def test_build_watch_thread_name_truncates_long_inputs() -> None:
@@ -117,7 +117,9 @@ def test_resolve_watch_thread_reuses_and_unarchives_stored_thread() -> None:
     stored_thread = FakeThread(555, archived=True)
     client.channels[555] = stored_thread
 
-    resolved_thread = asyncio.run(resolve_watch_thread(client, _target(thread_id="555")))
+    resolved_thread = asyncio.run(
+        resolve_watch_thread(client, _target(thread_id="555"))
+    )
 
     assert resolved_thread is stored_thread
     assert stored_thread.archived is False
@@ -130,7 +132,9 @@ def test_resolve_watch_thread_recovers_deleted_thread_with_replacement() -> None
     client.channels[123] = channel
     client.fetch_missing_ids.add(555)
 
-    resolved_thread = asyncio.run(resolve_watch_thread(client, _target(thread_id="555")))
+    resolved_thread = asyncio.run(
+        resolve_watch_thread(client, _target(thread_id="555"))
+    )
 
     assert resolved_thread is channel.created_threads[0]
     assert channel.thread_kwargs[0]["name"] == "V8Bot: C5 Corvette - manual targa #42"
@@ -145,7 +149,10 @@ def test_resolve_starred_watch_thread_creates_shortlist_thread() -> None:
     resolved_thread = asyncio.run(resolve_starred_watch_thread(client, _target()))
 
     assert resolved_thread is channel.created_threads[0]
-    assert channel.thread_kwargs[0]["name"] == "Starred C5 Corvette"
+    assert (
+        channel.thread_kwargs[0]["name"]
+        == "Starred V8Bot: C5 Corvette - manual targa #42"
+    )
     assert channel.thread_kwargs[0]["type"].name == "public_thread"
 
 

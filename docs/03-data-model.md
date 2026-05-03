@@ -187,6 +187,8 @@ Rules:
 - Sent listings are not re-posted by scheduled digests.
 - Starred listings remain visible in listing history, but are not pending
   digest rows.
+- Unstarred listings move back to `sent` history so they remain visible without
+  returning to pending digest output.
 - Inactive listings are hidden from visible listing history and are not pending
   digest rows.
 - Inactive listings are not reactivated by future scrapes for the same watch.

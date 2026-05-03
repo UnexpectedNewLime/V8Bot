@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from car_watch_bot.core.listing_status import (
     LISTING_STATUS_INACTIVE,
+    LISTING_STATUS_SENT,
     LISTING_STATUS_STARRED,
 )
 from car_watch_bot.db.models import WatchListing
@@ -166,6 +167,26 @@ def test_inactive_listing_is_not_reactivated_by_later_scrapes(
     assert visible_listing_ids == [2, 3]
     assert inactive_row is not None
     assert inactive_row.status == LISTING_STATUS_INACTIVE
+
+
+def test_unstar_watch_listing_restores_sent_history_without_deactivating(
+    db_session_factory,
+) -> None:
+    test_scrape_watch_now_stores_pending_listings(db_session_factory)
+    service = _listing_service(db_session_factory)
+    service.update_watch_listing_status("123", 1, 1, LISTING_STATUS_STARRED)
+
+    result = service.unstar_watch_listing("123", 1, 1)
+    visible_listing_ids = [
+        listing.listing_id for listing in service.list_watch_listings("123", 1)
+    ]
+    with db_session_factory() as session:
+        row = session.scalar(select(WatchListing).where(WatchListing.listing_id == 1))
+
+    assert result.status == LISTING_STATUS_SENT
+    assert visible_listing_ids == [1, 2, 3]
+    assert row is not None
+    assert row.status == LISTING_STATUS_SENT
 
 
 def test_listing_status_update_is_scoped_to_owner(db_session_factory) -> None:
