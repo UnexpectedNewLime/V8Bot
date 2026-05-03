@@ -22,9 +22,12 @@ from car_watch_bot.services.source_service import (
     SourceValidationError,
 )
 from car_watch_bot.services.watch_service import (
+    WatchDetails,
     WatchNotFoundError,
     WatchService,
     WatchSummary,
+    WatchUpdateRequest,
+    WatchUpdateResult,
     WatchValidationError,
 )
 
@@ -32,6 +35,9 @@ from car_watch_bot.services.watch_service import (
 logger = logging.getLogger(__name__)
 DISCORD_MESSAGE_LIMIT = 2000
 DISCORD_SAFE_MESSAGE_LIMIT = 1900
+DISCORD_CHOICE_LIMIT = 25
+DISCORD_CHOICE_NAME_LIMIT = 100
+DISCORD_SELECT_DESCRIPTION_LIMIT = 100
 URL_PATTERN = re.compile(r"https?://[^\s<>\]\),]+")
 HIDDEN_SOURCE_NOTES = {"skipped Facebook Marketplace source"}
 
@@ -44,6 +50,175 @@ class SourceBatchAddResult:
     failed: list[tuple[str, str]]
 
 
+async def _watch_id_autocomplete_choices(
+    interaction: discord.Interaction,
+    current: object,
+    watch_service: WatchService,
+) -> list[app_commands.Choice[int]]:
+    """Return user-scoped watch choices for Discord autocomplete."""
+
+    try:
+        summaries = watch_service.list_watches(str(interaction.user.id))
+    except Exception:
+        logger.exception(
+            "watch autocomplete failed",
+            extra={"discord_user_id": str(interaction.user.id)},
+        )
+        return []
+
+    normalized_current = _normalize_autocomplete_current(current)
+    choices: list[app_commands.Choice[int]] = []
+    for summary in summaries:
+        search_text = _watch_choice_search_text(summary)
+        if normalized_current and normalized_current not in search_text:
+            continue
+        choices.append(
+            app_commands.Choice(
+                name=_truncate_discord_label(_format_watch_choice_label(summary)),
+                value=summary.watch_id,
+            )
+        )
+        if len(choices) >= DISCORD_CHOICE_LIMIT:
+            break
+    return choices
+
+
+async def _source_id_autocomplete_choices(
+    interaction: discord.Interaction,
+    current: object,
+    source_service: SourceService,
+) -> list[app_commands.Choice[int]]:
+    """Return source choices scoped to the selected owned watch."""
+
+    watch_id = _namespace_int(interaction, "watch_id")
+    if watch_id is None:
+        return []
+
+    try:
+        summaries = source_service.list_sources_for_watch(
+            str(interaction.user.id),
+            watch_id,
+        )
+    except (WatchNotFoundError, SourceValidationError):
+        return []
+    except Exception:
+        logger.exception(
+            "source autocomplete failed",
+            extra={
+                "discord_user_id": str(interaction.user.id),
+                "watch_id": watch_id,
+            },
+        )
+        return []
+
+    normalized_current = _normalize_autocomplete_current(current)
+    choices: list[app_commands.Choice[int]] = []
+    for summary in summaries:
+        search_text = _source_choice_search_text(summary)
+        if normalized_current and normalized_current not in search_text:
+            continue
+        choices.append(
+            app_commands.Choice(
+                name=_truncate_discord_label(_format_source_choice_label(summary)),
+                value=summary.source_id,
+            )
+        )
+        if len(choices) >= DISCORD_CHOICE_LIMIT:
+            break
+    return choices
+
+
+class _SourceRemoveSelect(discord.ui.Select):
+    """Select menu that removes one source from a watch."""
+
+    def __init__(self, options: list[discord.SelectOption]) -> None:
+        super().__init__(
+            placeholder="Select source to remove",
+            min_values=1,
+            max_values=1,
+            options=options,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view = self.view
+        if not isinstance(view, _SourceRemoveView):
+            await interaction.response.send_message(
+                "source removal menu is no longer available",
+                ephemeral=True,
+            )
+            return
+        if str(interaction.user.id) != view.discord_user_id:
+            await interaction.response.send_message(
+                "this source removal menu belongs to another user",
+                ephemeral=True,
+            )
+            return
+
+        source_id = int(self.values[0])
+        source_name = view.source_names_by_id.get(source_id, f"source {source_id}")
+        try:
+            view.source_service.remove_source_from_watch(
+                view.discord_user_id,
+                view.watch_id,
+                source_id,
+            )
+        except WatchNotFoundError:
+            await interaction.response.edit_message(
+                content="watch not found or not owned by you",
+                view=None,
+            )
+            view.stop()
+            return
+        except SourceNotFoundError:
+            await interaction.response.edit_message(
+                content="source not found for watch",
+                view=None,
+            )
+            view.stop()
+            return
+        except Exception:
+            logger.exception(
+                "source removal menu failed",
+                extra={
+                    "discord_user_id": view.discord_user_id,
+                    "watch_id": view.watch_id,
+                    "source_id": source_id,
+                },
+            )
+            await interaction.response.edit_message(
+                content="failed to remove source",
+                view=None,
+            )
+            view.stop()
+            return
+
+        await interaction.response.edit_message(
+            content=f"source #{source_id} {source_name} removed from watch {view.watch_id}",
+            view=None,
+        )
+        view.stop()
+
+
+class _SourceRemoveView(discord.ui.View):
+    """Ephemeral source removal view."""
+
+    def __init__(
+        self,
+        source_service: SourceService,
+        discord_user_id: str,
+        watch_id: int,
+        summaries: list[SourceSummary],
+    ) -> None:
+        super().__init__(timeout=180)
+        self.source_service = source_service
+        self.discord_user_id = discord_user_id
+        self.watch_id = watch_id
+        self.source_names_by_id = {
+            summary.source_id: summary.name for summary in summaries
+        }
+        self.add_item(_SourceRemoveSelect(_source_remove_options(summaries)))
+
+
 def register_commands(
     command_tree: app_commands.CommandTree[discord.Client],
     watch_service: WatchService,
@@ -51,6 +226,26 @@ def register_commands(
     listing_service: ListingService,
 ) -> None:
     """Register supported slash commands."""
+
+    async def watch_id_autocomplete(
+        interaction: discord.Interaction,
+        current: object,
+    ) -> list[app_commands.Choice[int]]:
+        return await _watch_id_autocomplete_choices(
+            interaction,
+            current,
+            watch_service,
+        )
+
+    async def source_id_autocomplete(
+        interaction: discord.Interaction,
+        current: object,
+    ) -> list[app_commands.Choice[int]]:
+        return await _source_id_autocomplete_choices(
+            interaction,
+            current,
+            source_service,
+        )
 
     @command_tree.command(name="ping", description="Check whether the bot is responsive.")
     async def ping(interaction: discord.Interaction) -> None:
@@ -150,7 +345,84 @@ def register_commands(
 
         await _send_ephemeral_result(interaction, action, "failed to list watches")
 
+    @command_tree.command(name="watch_show", description="Show one watch in detail.")
+    @app_commands.autocomplete(watch_id=watch_id_autocomplete)
+    async def watch_show(interaction: discord.Interaction, watch_id: int) -> None:
+        async def action() -> str:
+            details = watch_service.get_watch_details(str(interaction.user.id), watch_id)
+            return _format_watch_details(details)
+
+        await _send_ephemeral_result(interaction, action, "failed to show watch")
+
+    @command_tree.command(name="watch_edit", description="Edit one of your watches.")
+    @app_commands.autocomplete(watch_id=watch_id_autocomplete)
+    async def watch_edit(
+        interaction: discord.Interaction,
+        watch_id: int,
+        car_query: str = "",
+        watch_name: str = "",
+        keywords: str = "",
+        exclude_keywords: str = "",
+        clear_exclusions: bool = False,
+        notify_time: str = "",
+        timezone: str = "",
+        currency: str = "",
+        distance_unit: str = "",
+        channel_id: str = "",
+        thread_id: str = "",
+        clear_channel: bool = False,
+        clear_thread: bool = False,
+        use_current_channel: bool = False,
+        active: bool | None = None,
+    ) -> None:
+        async def action() -> str:
+            if use_current_channel and channel_id.strip():
+                raise WatchValidationError(
+                    "channel_id cannot be set when use_current_channel is true"
+                )
+            current_channel_id = (
+                str(interaction.channel_id)
+                if use_current_channel and interaction.channel_id
+                else None
+            )
+            current_guild_id = (
+                str(interaction.guild_id)
+                if use_current_channel and interaction.guild_id
+                else None
+            )
+            result = watch_service.update_watch(
+                str(interaction.user.id),
+                watch_id,
+                WatchUpdateRequest(
+                    name=_optional_command_text(watch_name),
+                    car_query=_optional_command_text(car_query),
+                    keywords=_optional_command_text(keywords),
+                    exclude_keywords=_optional_command_text(exclude_keywords),
+                    clear_exclusions=clear_exclusions,
+                    notify_time=_optional_command_text(notify_time),
+                    timezone=_optional_command_text(timezone),
+                    currency=_optional_command_text(currency),
+                    distance_unit=_optional_command_text(distance_unit),
+                    guild_id=current_guild_id,
+                    channel_id=current_channel_id or _optional_command_text(channel_id),
+                    thread_id=_optional_command_text(thread_id),
+                    clear_channel=clear_channel,
+                    clear_thread=clear_thread,
+                    is_active=active,
+                ),
+            )
+            logger.info(
+                "watch_edit completed watch_id=%s user_id=%s changed_fields=%s",
+                watch_id,
+                interaction.user.id,
+                ",".join(result.changed_fields) or "none",
+            )
+            return _format_watch_edit_result(result)
+
+        await _send_ephemeral_result(interaction, action, "failed to edit watch")
+
     @command_tree.command(name="watch_scrape_now", description="Scrape one watch now.")
+    @app_commands.autocomplete(watch_id=watch_id_autocomplete)
     async def watch_scrape_now(interaction: discord.Interaction, watch_id: int) -> None:
         async def action() -> str:
             result = await listing_service.scrape_watch_now(
@@ -195,6 +467,7 @@ def register_commands(
         await _send_ephemeral_result(interaction, action, "failed to scrape watch")
 
     @command_tree.command(name="watch_listings", description="Show pending watch listings.")
+    @app_commands.autocomplete(watch_id=watch_id_autocomplete)
     async def watch_listings(interaction: discord.Interaction, watch_id: int) -> None:
         async def action() -> str:
             listings = listing_service.list_watch_listings(str(interaction.user.id), watch_id)
@@ -213,6 +486,7 @@ def register_commands(
         await _send_ephemeral_result(interaction, action, "failed to list watch listings")
 
     @command_tree.command(name="watch_remove", description="Remove one of your watches.")
+    @app_commands.autocomplete(watch_id=watch_id_autocomplete)
     async def watch_remove(interaction: discord.Interaction, watch_id: int) -> None:
         async def action() -> str:
             watch_service.deactivate_watch(str(interaction.user.id), watch_id)
@@ -221,6 +495,7 @@ def register_commands(
         await _send_ephemeral_result(interaction, action, "failed to remove watch")
 
     @command_tree.command(name="watch_keyword_add", description="Add a watch keyword.")
+    @app_commands.autocomplete(watch_id=watch_id_autocomplete)
     async def watch_keyword_add(
         interaction: discord.Interaction,
         watch_id: int,
@@ -233,6 +508,7 @@ def register_commands(
         await _send_ephemeral_result(interaction, action, "failed to add keyword")
 
     @command_tree.command(name="watch_keyword_remove", description="Remove a watch keyword.")
+    @app_commands.autocomplete(watch_id=watch_id_autocomplete)
     async def watch_keyword_remove(
         interaction: discord.Interaction,
         watch_id: int,
@@ -249,6 +525,7 @@ def register_commands(
         await _send_ephemeral_result(interaction, action, "failed to remove keyword")
 
     @command_tree.command(name="watch_exclude_add", description="Add an excluded keyword.")
+    @app_commands.autocomplete(watch_id=watch_id_autocomplete)
     async def watch_exclude_add(
         interaction: discord.Interaction,
         watch_id: int,
@@ -268,6 +545,7 @@ def register_commands(
         name="watch_exclude_remove",
         description="Remove an excluded keyword.",
     )
+    @app_commands.autocomplete(watch_id=watch_id_autocomplete)
     async def watch_exclude_remove(
         interaction: discord.Interaction,
         watch_id: int,
@@ -288,6 +566,7 @@ def register_commands(
         )
 
     @command_tree.command(name="watch_source_add", description="Add and test a source.")
+    @app_commands.autocomplete(watch_id=watch_id_autocomplete)
     async def watch_source_add(
         interaction: discord.Interaction,
         watch_id: int,
@@ -323,6 +602,7 @@ def register_commands(
         await _send_ephemeral_result(interaction, action, "failed to add source")
 
     @command_tree.command(name="watch_source_list", description="List watch sources.")
+    @app_commands.autocomplete(watch_id=watch_id_autocomplete)
     async def watch_source_list(interaction: discord.Interaction, watch_id: int) -> None:
         async def action() -> str:
             summaries = source_service.list_sources_for_watch(
@@ -336,6 +616,10 @@ def register_commands(
         await _send_ephemeral_result(interaction, action, "failed to list sources")
 
     @command_tree.command(name="watch_source_remove", description="Remove a watch source.")
+    @app_commands.autocomplete(
+        watch_id=watch_id_autocomplete,
+        source_id=source_id_autocomplete,
+    )
     async def watch_source_remove(
         interaction: discord.Interaction,
         watch_id: int,
@@ -350,6 +634,21 @@ def register_commands(
             return f"source {source_id} removed from watch {watch_id}"
 
         await _send_ephemeral_result(interaction, action, "failed to remove source")
+
+    @command_tree.command(
+        name="watch_source_remove_menu",
+        description="Pick a watch source to remove.",
+    )
+    @app_commands.autocomplete(watch_id=watch_id_autocomplete)
+    async def watch_source_remove_menu(
+        interaction: discord.Interaction,
+        watch_id: int,
+    ) -> None:
+        await _send_source_remove_menu(
+            interaction=interaction,
+            source_service=source_service,
+            watch_id=watch_id,
+        )
 
     @command_tree.command(name="watch_source_test", description="Test a source URL.")
     async def watch_source_test(interaction: discord.Interaction, url: str) -> None:
@@ -369,6 +668,7 @@ def register_commands(
         await _send_ephemeral_result(interaction, action, "failed to test source")
 
     @command_tree.command(name="watch_notify_time", description="Update notify time.")
+    @app_commands.autocomplete(watch_id=watch_id_autocomplete)
     async def watch_notify_time(
         interaction: discord.Interaction,
         watch_id: int,
@@ -385,6 +685,7 @@ def register_commands(
         await _send_ephemeral_result(interaction, action, "failed to update notify time")
 
     @command_tree.command(name="watch_currency", description="Update watch currency.")
+    @app_commands.autocomplete(watch_id=watch_id_autocomplete)
     async def watch_currency(
         interaction: discord.Interaction,
         watch_id: int,
@@ -404,6 +705,7 @@ def register_commands(
         name="watch_distance_unit",
         description="Update watch distance unit.",
     )
+    @app_commands.autocomplete(watch_id=watch_id_autocomplete)
     async def watch_distance_unit(
         interaction: discord.Interaction,
         watch_id: int,
@@ -483,6 +785,87 @@ async def _send_ephemeral_result(
         len(message),
     )
     await _send_ephemeral_message(interaction, message)
+
+
+async def _send_source_remove_menu(
+    *,
+    interaction: discord.Interaction,
+    source_service: SourceService,
+    watch_id: int,
+) -> None:
+    """Send an ephemeral source removal select menu."""
+
+    command_name = interaction.command.name if interaction.command else "unknown"
+    logger.info(
+        "discord command start command=%s user_id=%s guild_id=%s channel_id=%s",
+        command_name,
+        interaction.user.id,
+        interaction.guild_id,
+        interaction.channel_id,
+    )
+    await interaction.response.defer(ephemeral=True)
+    try:
+        summaries = source_service.list_sources_for_watch(
+            str(interaction.user.id),
+            watch_id,
+        )
+    except WatchNotFoundError:
+        logger.info(
+            "discord command watch not found command=%s user_id=%s",
+            command_name,
+            interaction.user.id,
+        )
+        await _send_ephemeral_message(interaction, "watch not found or not owned by you")
+        return
+    except SourceValidationError as exc:
+        logger.info(
+            "discord command validation failed command=%s user_id=%s error=%s",
+            command_name,
+            interaction.user.id,
+            exc,
+        )
+        await _send_ephemeral_message(interaction, str(exc))
+        return
+    except Exception:
+        logger.exception(
+            "discord command failed command=%s user_id=%s",
+            command_name,
+            interaction.user.id,
+        )
+        await _send_ephemeral_message(interaction, "failed to prepare source removal menu")
+        return
+
+    if not summaries:
+        await _send_ephemeral_message(
+            interaction,
+            f"watch {watch_id} has no active sources to remove",
+        )
+        return
+
+    visible_count = min(len(summaries), DISCORD_CHOICE_LIMIT)
+    suffix = ""
+    if len(summaries) > DISCORD_CHOICE_LIMIT:
+        suffix = f" Showing first {DISCORD_CHOICE_LIMIT} sources."
+    view = _SourceRemoveView(
+        source_service=source_service,
+        discord_user_id=str(interaction.user.id),
+        watch_id=watch_id,
+        summaries=summaries[:DISCORD_CHOICE_LIMIT],
+    )
+    await interaction.followup.send(
+        (
+            f"Select a source to remove from watch {watch_id} "
+            f"({visible_count} available).{suffix}"
+        ),
+        view=view,
+        ephemeral=True,
+    )
+    logger.info(
+        "discord command success command=%s user_id=%s source_options=%s",
+        command_name,
+        interaction.user.id,
+        visible_count,
+    )
 
 
 async def _send_ephemeral_message(
@@ -635,6 +1018,110 @@ def _split_long_line(line: str) -> list[str]:
     ]
 
 
+def _namespace_int(interaction: discord.Interaction, name: str) -> int | None:
+    """Read an integer value already chosen for another slash-command option."""
+
+    namespace = getattr(interaction, "namespace", None)
+    raw_value = getattr(namespace, name, None)
+    if raw_value is None:
+        return None
+    if isinstance(raw_value, int):
+        return raw_value
+    value_text = str(raw_value).strip().removeprefix("#")
+    if not value_text:
+        return None
+    try:
+        return int(value_text)
+    except ValueError:
+        return None
+
+
+def _normalize_autocomplete_current(current: object) -> str:
+    """Normalize Discord autocomplete input for case-insensitive matching."""
+
+    if current is None:
+        return ""
+    return str(current).strip().casefold()
+
+
+def _watch_choice_search_text(summary: WatchSummary) -> str:
+    """Build searchable text for a watch autocomplete choice."""
+
+    return " ".join(
+        [
+            str(summary.watch_id),
+            f"#{summary.watch_id}",
+            summary.car_query,
+            *summary.keywords,
+            *summary.exclude_keywords,
+        ]
+    ).casefold()
+
+
+def _source_choice_search_text(summary: SourceSummary) -> str:
+    """Build searchable text for a source autocomplete choice."""
+
+    return " ".join(
+        [
+            str(summary.source_id),
+            f"#{summary.source_id}",
+            summary.name,
+            summary.kind,
+            _source_domain(summary.base_url),
+            summary.base_url or "",
+        ]
+    ).casefold()
+
+
+def _format_watch_choice_label(summary: WatchSummary) -> str:
+    """Format a watch autocomplete label."""
+
+    keywords = _comma_list(summary.keywords)
+    return (
+        f"#{summary.watch_id} {summary.car_query} - "
+        f"{keywords} - {summary.active_sources_count} sources"
+    )
+
+
+def _format_source_choice_label(summary: SourceSummary) -> str:
+    """Format a source autocomplete label."""
+
+    return (
+        f"#{summary.source_id} {summary.name} "
+        f"({summary.kind}, {_source_domain(summary.base_url)})"
+    )
+
+
+def _source_remove_options(summaries: list[SourceSummary]) -> list[discord.SelectOption]:
+    """Build select-menu options for source removal."""
+
+    return [
+        discord.SelectOption(
+            label=_truncate_discord_label(f"#{summary.source_id} {summary.name}"),
+            value=str(summary.source_id),
+            description=_truncate_discord_label(
+                f"{summary.kind} - {_source_domain(summary.base_url)}",
+                DISCORD_SELECT_DESCRIPTION_LIMIT,
+            ),
+        )
+        for summary in summaries[:DISCORD_CHOICE_LIMIT]
+    ]
+
+
+def _truncate_discord_label(
+    value: str,
+    limit: int = DISCORD_CHOICE_NAME_LIMIT,
+) -> str:
+    """Trim a Discord choice/select label to its API limit."""
+
+    compact_value = " ".join(value.split())
+    if len(compact_value) <= limit:
+        return compact_value
+    if limit <= 3:
+        return compact_value[:limit]
+    return f"{compact_value[: limit - 3].rstrip()}..."
+
+
 def _format_watch_created(summary: WatchSummary) -> str:
     """Format watch creation confirmation."""
 
@@ -675,6 +1162,69 @@ def _format_watch_list(summaries: list[WatchSummary]) -> str:
     """Format active watch summaries."""
 
     return "\n\n".join(_format_watch_block(summary) for summary in summaries)
+
+
+def _format_watch_details(details: WatchDetails) -> str:
+    """Format detailed watch configuration."""
+
+    lines = [
+        "**Watch details**",
+        f"`#{details.watch_id}` **{details.name}**",
+        f"Active: `{_yes_no(details.is_active)}`",
+        f"Car query: {details.car_query}",
+        f"Keywords: {_comma_list(details.keywords)}",
+        f"Excluded: {_comma_list(details.exclude_keywords)}",
+        f"Notify: `{details.notify_time}` `{details.timezone}`",
+        f"Defaults: `{details.preferred_currency}` / `{details.distance_unit}`",
+        (
+            "Delivery: "
+            f"guild `{_optional_id(details.guild_id)}` | "
+            f"channel `{_optional_id(details.channel_id)}` | "
+            f"thread `{_optional_id(details.thread_id)}`"
+        ),
+        f"Criteria version: `{details.criteria_version}`",
+        (
+            f"Sources: `{details.active_sources_count}` active / "
+            f"`{len(details.sources)}` total"
+        ),
+    ]
+    source_lines = _format_watch_source_details(details)
+    if source_lines:
+        lines.extend(source_lines)
+    return "\n".join(lines)
+
+
+def _format_watch_edit_result(result: WatchUpdateResult) -> str:
+    """Format the result of a consolidated watch edit."""
+
+    if result.changed_fields:
+        heading = "**Watch updated**"
+        changes = f"Changed: `{', '.join(result.changed_fields)}`"
+    else:
+        heading = "**Watch unchanged**"
+        changes = "No editable fields changed."
+    return "\n".join([heading, changes, _format_watch_details(result.details)])
+
+
+def _format_watch_source_details(details: WatchDetails) -> list[str]:
+    """Format source rows for watch details."""
+
+    if not details.sources:
+        return ["Sources detail: none"]
+    lines = ["Sources detail:"]
+    for source in details.sources[:10]:
+        state = "enabled" if source.is_enabled else "disabled"
+        if not source.is_active:
+            state = f"{state}, inactive"
+        lines.append(
+            (
+                f"- `#{source.source_id}` **{source.name}** "
+                f"(`{source.kind}`, {_source_domain(source.base_url)}, {state})"
+            )
+        )
+    if len(details.sources) > 10:
+        lines.append(f"...and {len(details.sources) - 10} more")
+    return lines
 
 
 def _format_watch_block(summary: WatchSummary) -> str:
@@ -725,19 +1275,27 @@ def _format_digest_listing(listing: DigestListing) -> str:
     """Format one pending listing."""
 
     reasons = ", ".join(listing.score_reasons) or "none"
-    return "\n".join(
-        [
-            f"listing_id: {listing.listing_id}",
-            f"title: {listing.title}",
-            f"source: {listing.source_name}",
-            f"original price: {listing.original_price}",
-            f"converted price: {listing.converted_price}",
-            f"original mileage: {listing.original_mileage}",
-            f"converted mileage: {listing.converted_mileage}",
-            f"score reasons: {reasons}",
-            f"link: {listing.url}",
-        ]
-    )
+    lines = [
+        f"listing_id: {listing.listing_id}",
+        f"title: {listing.title}",
+        f"source: {listing.source_name}",
+        f"original price: {listing.original_price}",
+        f"converted price: {listing.converted_price}",
+        f"original mileage: {listing.original_mileage}",
+        f"converted mileage: {listing.converted_mileage}",
+    ]
+    if listing.price_change:
+        lines.append(f"price change: {listing.price_change}")
+    if listing.location:
+        lines.append(f"location: {listing.location}")
+    if listing.first_seen:
+        lines.append(f"first seen: {listing.first_seen}")
+    if listing.last_seen:
+        lines.append(f"last seen: {listing.last_seen}")
+    if listing.seller_info:
+        lines.append(f"seller info: {listing.seller_info}")
+    lines.extend([f"score reasons: {reasons}", f"link: {listing.url}"])
+    return "\n".join(lines)
 
 
 def _comma_list(values: list[str]) -> str:
@@ -750,6 +1308,19 @@ def _yes_no(value: bool) -> str:
     """Format a bool for Discord text."""
 
     return "yes" if value else "no"
+
+
+def _optional_id(value: str | None) -> str:
+    """Format an optional Discord id."""
+
+    return value or "none"
+
+
+def _optional_command_text(value: str) -> str | None:
+    """Convert optional Discord command text to a service-layer optional."""
+
+    normalized_value = value.strip()
+    return normalized_value or None
 
 
 def _source_domain(url: str | None) -> str:

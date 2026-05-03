@@ -169,14 +169,22 @@ def _format_listing_embed_value(listing: DigestListing) -> str:
     """Format one digest listing as an embed field value."""
 
     reasons = ", ".join(listing.score_reasons) or "none"
-    return "\n".join(
-        [
-            f"Source: {listing.source_name}",
-            f"Original price: {listing.original_price}",
-            f"Converted price: {listing.converted_price}",
-            f"Original mileage: {listing.original_mileage}",
-            f"Converted mileage: {listing.converted_mileage}",
-            f"Score reasons: {reasons}",
-            f"Link: {listing.url}",
-        ]
-    )[:1024]
+    lines = [
+        f"Source: {listing.source_name}",
+        f"Original price: {listing.original_price}",
+        f"Converted price: {listing.converted_price}",
+        f"Original mileage: {listing.original_mileage}",
+        f"Converted mileage: {listing.converted_mileage}",
+    ]
+    if listing.price_change:
+        lines.append(f"Price change: {listing.price_change}")
+    if listing.location:
+        lines.append(f"Location: {listing.location}")
+    if listing.first_seen:
+        lines.append(f"First seen: {listing.first_seen}")
+    if listing.last_seen:
+        lines.append(f"Last seen: {listing.last_seen}")
+    if listing.seller_info:
+        lines.append(f"Seller info: {listing.seller_info}")
+    lines.extend([f"Score reasons: {reasons}", f"Link: {listing.url}"])
+    return "\n".join(lines)[:1024]

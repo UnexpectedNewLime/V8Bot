@@ -74,6 +74,12 @@ class DigestListing:
     converted_mileage: str
     score_reasons: list[str]
     url: str
+    location: str | None = None
+    first_seen: str | None = None
+    last_seen: str | None = None
+    seller_info: str | None = None
+    image_url: str | None = None
+    price_change: str | None = None
 
 
 @dataclass(frozen=True)

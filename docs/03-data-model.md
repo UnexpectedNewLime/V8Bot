@@ -159,6 +159,9 @@ Current dedupe behavior:
 - `content_hash` is stored but not currently used as the primary upsert lookup.
 - Rediscovered rows are refreshed with latest listing fields, score, conversion,
   raw payload, and `last_seen_at`.
+- New and refreshed rows store V8Bot namespaced price snapshots in `raw_payload`
+  when a complete listing price is available. This supports honest price-change
+  display without adding dedicated price history tables.
 
 ## WatchListing
 
@@ -251,7 +254,9 @@ Rules:
 ## Not Implemented In The Current Schema
 
 - There is no `digest_batches` table.
-- Listing image URL, seller name, and listed-at fields are not persisted.
+- Listing image URL, seller name, and listed-at fields do not have dedicated
+  columns. Scrapers may preserve seller/image metadata in `raw_payload` for
+  digest presentation.
 - User email, website account linkage, and global preferences are not
   implemented.
 - Database migrations are not implemented.
