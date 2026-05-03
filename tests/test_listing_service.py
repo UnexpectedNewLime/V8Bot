@@ -53,7 +53,9 @@ def test_scrape_watch_now_stores_pending_listings(db_session_factory) -> None:
         SourceRepository(session).add_source_to_watch(db_watch.id, source.id)
         session.commit()
 
-    result = asyncio.run(_listing_service(db_session_factory).scrape_watch_now("123", 1))
+    result = asyncio.run(
+        _listing_service(db_session_factory).scrape_watch_now("123", 1)
+    )
 
     assert result.watch_id == 1
     assert result.sources_seen == 1
@@ -69,7 +71,9 @@ def test_scrape_watch_now_reports_only_new_pending_listing_ids(
 ) -> None:
     test_scrape_watch_now_stores_pending_listings(db_session_factory)
 
-    result = asyncio.run(_listing_service(db_session_factory).scrape_watch_now("123", 1))
+    result = asyncio.run(
+        _listing_service(db_session_factory).scrape_watch_now("123", 1)
+    )
     new_listings = _listing_service(db_session_factory).list_watch_listings(
         "123",
         1,
@@ -125,9 +129,7 @@ def test_listing_status_actions_update_visible_history(db_session_factory) -> No
     ]
     with db_session_factory() as session:
         watch_listings = list(
-            session.scalars(
-                select(WatchListing).order_by(WatchListing.listing_id)
-            )
+            session.scalars(select(WatchListing).order_by(WatchListing.listing_id))
         )
 
     assert starred.status == LISTING_STATUS_STARRED
@@ -189,6 +191,27 @@ def test_unstar_watch_listing_restores_sent_history_without_deactivating(
     assert row.status == LISTING_STATUS_SENT
 
 
+def test_unstar_watch_listing_does_not_reactivate_inactive_listing(
+    db_session_factory,
+) -> None:
+    test_scrape_watch_now_stores_pending_listings(db_session_factory)
+    service = _listing_service(db_session_factory)
+    service.update_watch_listing_status("123", 1, 1, LISTING_STATUS_STARRED)
+    service.update_watch_listing_status("123", 1, 1, LISTING_STATUS_INACTIVE)
+
+    result = service.unstar_watch_listing("123", 1, 1)
+    visible_listing_ids = [
+        listing.listing_id for listing in service.list_watch_listings("123", 1)
+    ]
+    with db_session_factory() as session:
+        row = session.scalar(select(WatchListing).where(WatchListing.listing_id == 1))
+
+    assert result.status == LISTING_STATUS_INACTIVE
+    assert visible_listing_ids == [2, 3]
+    assert row is not None
+    assert row.status == LISTING_STATUS_INACTIVE
+
+
 def test_listing_status_update_is_scoped_to_owner(db_session_factory) -> None:
     test_scrape_watch_now_stores_pending_listings(db_session_factory)
 
@@ -245,7 +268,9 @@ def test_scrape_watch_now_reports_skipped_sources(db_session_factory) -> None:
         SourceRepository(session).add_source_to_watch(db_watch.id, source.id)
         session.commit()
 
-    result = asyncio.run(_listing_service(db_session_factory).scrape_watch_now("123", 1))
+    result = asyncio.run(
+        _listing_service(db_session_factory).scrape_watch_now("123", 1)
+    )
 
     assert result.sources_seen == 1
     assert result.sources_scraped == 0

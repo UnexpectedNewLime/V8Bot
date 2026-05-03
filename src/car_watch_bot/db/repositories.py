@@ -13,6 +13,7 @@ from car_watch_bot.core.listing_status import (
     LISTING_STATUS_EXCLUDED,
     LISTING_STATUS_PENDING_DIGEST,
     LISTING_STATUS_SENT,
+    LISTING_STATUS_STARRED,
     VISIBLE_LISTING_STATUSES,
 )
 from car_watch_bot.core.models import ListingCandidate, ScoreResult
@@ -218,7 +219,9 @@ class WatchRepository:
         return list(
             self.session.scalars(
                 select(Watch)
-                .options(selectinload(Watch.watch_sources).selectinload(WatchSource.source))
+                .options(
+                    selectinload(Watch.watch_sources).selectinload(WatchSource.source)
+                )
                 .where(Watch.user_id == user_id, Watch.is_active.is_(True))
                 .order_by(Watch.id)
             )
@@ -255,7 +258,9 @@ class WatchRepository:
         return list(
             self.session.scalars(
                 select(Watch)
-                .options(selectinload(Watch.watch_sources).selectinload(WatchSource.source))
+                .options(
+                    selectinload(Watch.watch_sources).selectinload(WatchSource.source)
+                )
                 .where(Watch.is_active.is_(True))
                 .order_by(Watch.id)
             )
@@ -419,7 +424,9 @@ class ListingRepository:
         """Insert a listing if its source URL is new."""
 
         existing_listing = self.session.scalar(
-            select(Listing).where(Listing.source_id == source_id, Listing.url == listing.url)
+            select(Listing).where(
+                Listing.source_id == source_id, Listing.url == listing.url
+            )
         )
         if existing_listing is not None:
             self._update_listing(
@@ -466,7 +473,9 @@ class ListingRepository:
         """Find a previously stored listing for a candidate."""
 
         return self.session.scalar(
-            select(Listing).where(Listing.source_id == source_id, Listing.url == listing.url)
+            select(Listing).where(
+                Listing.source_id == source_id, Listing.url == listing.url
+            )
         )
 
     def update_listing(
@@ -652,7 +661,50 @@ class ListingRepository:
     ) -> WatchListing | None:
         """Update a watch-listing status owned by a user."""
 
-        watch_listing = self.session.scalar(
+        watch_listing = self.get_watch_listing_for_user(
+            user_id=user_id,
+            watch_id=watch_id,
+            listing_id=listing_id,
+        )
+        if watch_listing is None:
+            return None
+        watch_listing.status = status
+        if watch_listing.sent_at is None:
+            watch_listing.sent_at = datetime.utcnow()
+        self.session.flush()
+        return watch_listing
+
+    def unstar_watch_listing_for_user(
+        self,
+        user_id: int,
+        watch_id: int,
+        listing_id: int,
+    ) -> WatchListing | None:
+        """Remove starred state without reactivating inactive listings."""
+
+        watch_listing = self.get_watch_listing_for_user(
+            user_id=user_id,
+            watch_id=watch_id,
+            listing_id=listing_id,
+        )
+        if watch_listing is None:
+            return None
+        if watch_listing.status == LISTING_STATUS_STARRED:
+            watch_listing.status = LISTING_STATUS_SENT
+            if watch_listing.sent_at is None:
+                watch_listing.sent_at = datetime.utcnow()
+            self.session.flush()
+        return watch_listing
+
+    def get_watch_listing_for_user(
+        self,
+        user_id: int,
+        watch_id: int,
+        listing_id: int,
+    ) -> WatchListing | None:
+        """Return a watch-listing row owned by a user."""
+
+        return self.session.scalar(
             select(WatchListing)
             .join(Watch)
             .where(
@@ -663,13 +715,6 @@ class ListingRepository:
                 WatchListing.listing_id == listing_id,
             )
         )
-        if watch_listing is None:
-            return None
-        watch_listing.status = status
-        if watch_listing.sent_at is None:
-            watch_listing.sent_at = datetime.utcnow()
-        self.session.flush()
-        return watch_listing
 
 
 class ScrapeAttemptRepository:

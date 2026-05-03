@@ -444,19 +444,19 @@ async def _handle_star_listing_interaction(
         await _send_ephemeral_response(interaction, "listing actions are unavailable")
         return
 
+    starred_message: discord.Message | None = None
     try:
-        listing_service.update_watch_listing_status(
+        listing_service.get_watch_listing_status(
             discord_user_id=str(interaction.user.id),
             watch_id=watch_id,
             listing_id=listing_id,
-            status=spec.status,
         )
         target = watch_service.get_delivery_target(
             discord_user_id=str(interaction.user.id),
             watch_id=watch_id,
         )
         starred_thread = await resolve_starred_watch_thread(interaction.client, target)
-        await _send_starred_listing_message(
+        starred_message = await _send_starred_listing_message(
             starred_thread=starred_thread,
             interaction=interaction,
             watch_id=watch_id,
@@ -469,7 +469,19 @@ async def _handle_star_listing_interaction(
                 watch_id,
                 starred_thread_id,
             )
+        listing_service.update_watch_listing_status(
+            discord_user_id=str(interaction.user.id),
+            watch_id=watch_id,
+            listing_id=listing_id,
+            status=spec.status,
+        )
     except (WatchNotFoundError, WatchListingNotFoundError):
+        if starred_message is not None:
+            await _delete_listing_message(
+                listing_message=starred_message,
+                watch_id=watch_id,
+                listing_id=listing_id,
+            )
         logger.info(
             "listing action rejected user_id=%s watch_id=%s listing_id=%s action=%s",
             interaction.user.id,
@@ -483,6 +495,12 @@ async def _handle_star_listing_interaction(
         )
         return
     except WatchValidationError as exc:
+        if starred_message is not None:
+            await _delete_listing_message(
+                listing_message=starred_message,
+                watch_id=watch_id,
+                listing_id=listing_id,
+            )
         logger.info(
             "listing star validation failed user_id=%s watch_id=%s error=%s",
             interaction.user.id,
@@ -492,10 +510,22 @@ async def _handle_star_listing_interaction(
         await _send_ephemeral_response(interaction, str(exc))
         return
     except ListingStatusValidationError:
+        if starred_message is not None:
+            await _delete_listing_message(
+                listing_message=starred_message,
+                watch_id=watch_id,
+                listing_id=listing_id,
+            )
         logger.info("listing action validation failed action=%s", action)
         await _send_ephemeral_response(interaction, "listing action is not supported")
         return
     except Exception:
+        if starred_message is not None:
+            await _delete_listing_message(
+                listing_message=starred_message,
+                watch_id=watch_id,
+                listing_id=listing_id,
+            )
         logger.exception(
             "listing action failed user_id=%s watch_id=%s listing_id=%s action=%s",
             interaction.user.id,
@@ -563,7 +593,7 @@ async def _send_starred_listing_message(
     interaction: discord.Interaction,
     watch_id: int,
     listing_id: int,
-) -> None:
+) -> discord.Message | None:
     """Copy the clicked listing message into the starred shortlist thread."""
 
     send_kwargs: dict[str, object] = {
@@ -578,7 +608,7 @@ async def _send_starred_listing_message(
         send_kwargs["embed"] = copy_embed() if copy_embed is not None else source_embed
     else:
         send_kwargs["content"] = f"Starred listing {listing_id}."
-    await starred_thread.send(**send_kwargs)
+    return await starred_thread.send(**send_kwargs)
 
 
 async def _delete_listing_message(

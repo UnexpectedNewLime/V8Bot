@@ -5,10 +5,7 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from car_watch_bot.core.listing_status import (
-    LISTING_STATUS_SENT,
-    USER_SETTABLE_LISTING_STATUSES,
-)
+from car_watch_bot.core.listing_status import USER_SETTABLE_LISTING_STATUSES
 from car_watch_bot.core.models import DigestListing, ScrapeNowResult
 from car_watch_bot.db.repositories import (
     ListingRepository,
@@ -92,7 +89,9 @@ class ListingService:
                 adapter = self.scraper_adapters.get(source.kind)
                 if adapter is None:
                     skipped_count += 1
-                    warnings.append(f"source {source.id} skipped: no adapter for {source.kind}")
+                    warnings.append(
+                        f"source {source.id} skipped: no adapter for {source.kind}"
+                    )
                     continue
                 created_count += await scrape_service.scrape_watch_source(
                     watch=watch,
@@ -212,11 +211,10 @@ class ListingService:
             if watch is None:
                 raise WatchNotFoundError("watch not found")
             listing_repository = ListingRepository(session)
-            watch_listing = listing_repository.update_watch_listing_status_for_user(
+            watch_listing = listing_repository.unstar_watch_listing_for_user(
                 user_id=user.id,
                 watch_id=watch.id,
                 listing_id=listing_id,
-                status=LISTING_STATUS_SENT,
             )
             if watch_listing is None:
                 raise WatchListingNotFoundError("listing not found for watch")
@@ -227,3 +225,29 @@ class ListingService:
             )
             session.commit()
             return result
+
+    def get_watch_listing_status(
+        self,
+        discord_user_id: str,
+        watch_id: int,
+        listing_id: int,
+    ) -> ListingStatusUpdateResult:
+        """Return the status for one owned watch-listing row."""
+
+        with self.session_factory() as session:
+            user = UserRepository(session).get_or_create_by_discord_id(discord_user_id)
+            watch = WatchRepository(session).get_active_for_user(watch_id, user.id)
+            if watch is None:
+                raise WatchNotFoundError("watch not found")
+            watch_listing = ListingRepository(session).get_watch_listing_for_user(
+                user_id=user.id,
+                watch_id=watch.id,
+                listing_id=listing_id,
+            )
+            if watch_listing is None:
+                raise WatchListingNotFoundError("listing not found for watch")
+            return ListingStatusUpdateResult(
+                watch_id=watch.id,
+                listing_id=listing_id,
+                status=watch_listing.status,
+            )

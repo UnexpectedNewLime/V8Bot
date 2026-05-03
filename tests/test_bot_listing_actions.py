@@ -115,6 +115,31 @@ def test_star_action_calls_listing_service_and_posts_to_starred_thread() -> None
     ]
 
 
+def test_star_action_does_not_persist_status_when_starred_send_fails() -> None:
+    listing_service = FakeListingService()
+    interaction = FakeInteraction(
+        listing_service=listing_service,
+        watch_service=FakeWatchService(),
+        channels={999: FakeChannel(thread=FakeThread(900, send_fails=True))},
+        message=FakeListingMessage(embeds=[FakeEmbed("listing embed")]),
+    )
+
+    asyncio.run(
+        handle_listing_action_interaction(
+            interaction=interaction,
+            action="star",
+            watch_id=42,
+            listing_id=7,
+        )
+    )
+
+    assert listing_service.status_checks == [("123", 42, 7)]
+    assert listing_service.calls == []
+    assert interaction.response.sent_messages == [
+        ("failed to update listing", True, None),
+    ]
+
+
 def test_delete_action_opens_confirmation_modal() -> None:
     listing_service = FakeListingService()
     interaction = FakeInteraction(
@@ -227,6 +252,18 @@ class FakeListingService(ListingService):
     def __init__(self) -> None:
         self.calls: list[tuple[str, int, int, str]] = []
         self.unstar_calls: list[tuple[str, int, int]] = []
+        self.status_checks: list[tuple[str, int, int]] = []
+
+    def get_watch_listing_status(
+        self,
+        discord_user_id: str,
+        watch_id: int,
+        listing_id: int,
+    ) -> object:
+        """Record a status lookup."""
+
+        self.status_checks.append((discord_user_id, watch_id, listing_id))
+        return object()
 
     def update_watch_listing_status(
         self,
@@ -331,15 +368,16 @@ class FakeClient:
 class FakeChannel:
     """Discord channel test double."""
 
-    def __init__(self) -> None:
+    def __init__(self, thread: object | None = None) -> None:
         self.created_threads: list[FakeThread] = []
         self.thread_kwargs: list[dict[str, object]] = []
+        self.thread = thread
 
     async def create_thread(self, **kwargs: object) -> object:
         """Create a fake public thread."""
 
         self.thread_kwargs.append(kwargs)
-        thread = FakeThread(900 + len(self.created_threads))
+        thread = self.thread or FakeThread(900 + len(self.created_threads))
         self.created_threads.append(thread)
         return thread
 
@@ -347,14 +385,18 @@ class FakeChannel:
 class FakeThread:
     """Discord thread test double."""
 
-    def __init__(self, thread_id: int) -> None:
+    def __init__(self, thread_id: int, send_fails: bool = False) -> None:
         self.id = thread_id
+        self.send_fails = send_fails
         self.sent_messages: list[dict[str, object]] = []
 
-    async def send(self, **kwargs: object) -> None:
+    async def send(self, **kwargs: object) -> object:
         """Record a thread send."""
 
+        if self.send_fails:
+            raise RuntimeError("send failed")
         self.sent_messages.append(kwargs)
+        return FakeListingMessage()
 
 
 class FakeListingMessage:
