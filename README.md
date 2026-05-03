@@ -69,7 +69,8 @@ scripts/setup_dev.sh
 ```
 
 The script creates `data/`, copies `.env.example` to `.env` when `.env` does
-not already exist, checks for Podman tooling, and prints the next run commands.
+not already exist, prompts for the Discord bot token and guild ID when they are
+missing, checks for Podman tooling, and prints the next run commands.
 
 If the script fails with a permission error, make it executable and run it
 again:
@@ -88,7 +89,7 @@ cp .env.example .env
 
 Only run the copy command when `.env` does not already exist.
 
-Edit `.env` before starting the bot. Set at least:
+If you skipped the prompts, edit `.env` before starting the bot. Set at least:
 
 ```text
 DISCORD_BOT_TOKEN=<your bot token>
