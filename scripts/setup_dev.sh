@@ -57,7 +57,10 @@ prompt_env_value() {
     return
   fi
 
-  read -r -p "$prompt (leave blank to skip): " new_value
+  if ! read -r -p "$prompt (leave blank to skip): " new_value; then
+    echo
+    new_value=""
+  fi
 
   if [[ -n "$new_value" ]]; then
     set_env_value "$key" "$new_value"
