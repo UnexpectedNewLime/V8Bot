@@ -102,6 +102,7 @@ class WatchDeliveryTarget:
     included_keywords: list[str]
     channel_id: str
     thread_id: str | None
+    starred_thread_id: str | None
 
 
 @dataclass(frozen=True)

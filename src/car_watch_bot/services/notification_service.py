@@ -118,4 +118,5 @@ def _delivery_target(watch: Watch) -> WatchDeliveryTarget:
         included_keywords=list(watch.included_keywords),
         channel_id=watch.channel_id,
         thread_id=watch.thread_id,
+        starred_thread_id=watch.starred_thread_id,
     )

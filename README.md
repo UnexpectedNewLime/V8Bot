@@ -236,12 +236,23 @@ per user, such as `cars-on-line` and `cars-on-line 2`.
 Expected result:
 
 - The command response is private to the user.
-- Listing messages are posted publicly to the channel.
+- Listing messages are posted publicly to the watch thread.
 - Each listing is its own embed.
+- Each listing embed has Star and Delete buttons.
 - Prices use whole-number car formatting, such as `AUD 26,850`.
 - Embeds include optional location, first seen, last seen, seller/dealer details,
   listing images, and price-change details when the stored listing data has
   those values.
+
+Listing action buttons update the stored watch-listing status for the user who
+owns the watch. Star copies the listing into a thread named from the normal
+watch thread with `Starred ` prefixed, changes the original listing buttons to
+Unstar, and keeps it visible in `/watch_listings`.
+Delete opens a confirmation modal, removes the clicked Discord message, and
+keeps the listing out of later scrape output for that watch. The delete modal
+includes an optional free-text reason field for future analytics. Unstar opens
+a confirmation modal, removes the starred-thread copy, restores Star and Delete
+on the original watch-thread listing, and leaves that listing active.
 
 You can also run the flow manually:
 
@@ -325,7 +336,10 @@ When the bot is running, APScheduler starts:
 - digest checks every minute
 
 Digest checks send only stored, unnotified listings for watches whose local
-`notify_time` matches the current minute.
+`notify_time` matches the current minute. Digest listing embeds include the same
+listing action buttons as manual scrape output. Successfully sent digest rows
+are marked `sent`, while starred and inactive rows are not treated as pending
+digest items.
 
 ## Listing Embeds
 
@@ -375,6 +389,7 @@ select id, user_id, name, query, notification_time from watches;
 select id, name, kind, base_url, is_active from sources;
 select id, title, url, price_amount, mileage_value, location_text, first_seen_at, last_seen_at
 from listings;
+select watch_id, listing_id, status, sent_at from watch_listings;
 ```
 
 ## Docker Deployment

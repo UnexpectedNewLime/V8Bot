@@ -51,6 +51,7 @@ class Watch(Base):
     guild_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     channel_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     thread_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    starred_thread_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     name: Mapped[str] = mapped_column(String(120))
     query: Mapped[str] = mapped_column(String(240))
     included_keywords: Mapped[list[str]] = mapped_column(JSON, default=list)
@@ -62,7 +63,9 @@ class Watch(Base):
     criteria_version: Mapped[int] = mapped_column(Integer, default=1)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     deactivated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    last_digest_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_digest_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -82,7 +85,9 @@ class Source(Base):
     __table_args__ = (UniqueConstraint("owner_user_id", "name"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    owner_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    owner_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
     name: Mapped[str] = mapped_column(String(120))
     kind: Mapped[str] = mapped_column(String(40), default="mock")
     base_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -145,7 +150,9 @@ class Listing(Base):
         Numeric(12, 2),
         nullable=True,
     )
-    converted_price_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    converted_price_currency: Mapped[str | None] = mapped_column(
+        String(3), nullable=True
+    )
     mileage_value: Mapped[int | None] = mapped_column(Integer, nullable=True)
     mileage_unit: Mapped[str | None] = mapped_column(String(2), nullable=True)
     converted_mileage_value: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -159,7 +166,9 @@ class Listing(Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     source: Mapped[Source] = relationship(back_populates="listings")
-    watch_listings: Mapped[list["WatchListing"]] = relationship(back_populates="listing")
+    watch_listings: Mapped[list["WatchListing"]] = relationship(
+        back_populates="listing"
+    )
 
 
 class WatchListing(Base):
@@ -173,8 +182,11 @@ class WatchListing(Base):
     listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"), index=True)
     matched_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     watch_criteria_version: Mapped[int] = mapped_column(Integer)
-    status: Mapped[str] = mapped_column(String(24), default="pending_digest", index=True)
+    status: Mapped[str] = mapped_column(
+        String(24), default="pending_digest", index=True
+    )
     sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    starred_message_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     watch: Mapped[Watch] = relationship(back_populates="watch_listings")
     listing: Mapped[Listing] = relationship(back_populates="watch_listings")
@@ -204,7 +216,9 @@ class SourceTestAttempt(Base):
     __tablename__ = "source_test_attempts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    source_id: Mapped[int | None] = mapped_column(ForeignKey("sources.id"), nullable=True)
+    source_id: Mapped[int | None] = mapped_column(
+        ForeignKey("sources.id"), nullable=True
+    )
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     url: Mapped[str] = mapped_column(String(1000))
     started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
