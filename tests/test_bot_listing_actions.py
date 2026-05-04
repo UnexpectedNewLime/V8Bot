@@ -118,7 +118,7 @@ def test_star_action_calls_listing_service_and_posts_to_starred_thread() -> None
     ] == [
         "Unstar",
     ]
-    assert interaction.response.sent_messages == [
+    assert interaction.followup.sent_messages == [
         ("Listing 7 starred.", True, None),
     ]
 
@@ -152,7 +152,7 @@ def test_repeated_star_action_only_updates_original_buttons() -> None:
     ] == [
         "Unstar",
     ]
-    assert interaction.response.sent_messages == [
+    assert interaction.followup.sent_messages == [
         ("Listing 7 is already starred.", True, None),
     ]
 
@@ -177,7 +177,7 @@ def test_star_action_does_not_persist_status_when_starred_send_fails() -> None:
 
     assert listing_service.status_checks == [("123", 42, 7)]
     assert listing_service.calls == []
-    assert interaction.response.sent_messages == [
+    assert interaction.followup.sent_messages == [
         ("failed to update listing", True, None),
     ]
 
@@ -554,11 +554,17 @@ class FakeResponse:
         self.sent_messages: list[tuple[str, bool, object | None]] = []
         self.edited_messages: list[tuple[str, object | None]] = []
         self.modals: list[object] = []
+        self.deferred: bool = False
 
     def is_done(self) -> bool:
         """Return whether an initial response has already been sent."""
 
-        return bool(self.sent_messages or self.edited_messages)
+        return self.deferred or bool(self.sent_messages or self.edited_messages)
+
+    async def defer(self, ephemeral: bool, thinking: bool) -> None:
+        """Record a deferred response."""
+
+        self.deferred = True
 
     async def send_message(
         self,

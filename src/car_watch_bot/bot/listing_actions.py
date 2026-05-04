@@ -468,6 +468,7 @@ async def _handle_star_listing_interaction(
 
     starred_message: discord.Message | None = None
     try:
+        await _defer_ephemeral_response(interaction)
         status_result = listing_service.get_watch_listing_status(
             discord_user_id=str(interaction.user.id),
             watch_id=watch_id,
@@ -839,3 +840,11 @@ async def _send_ephemeral_response(
         await interaction.followup.send(message, **response_kwargs)
         return
     await interaction.response.send_message(message, **response_kwargs)
+
+
+async def _defer_ephemeral_response(interaction: discord.Interaction) -> None:
+    """Acknowledge an interaction before slower follow-up work."""
+
+    if interaction.response.is_done():
+        return
+    await interaction.response.defer(ephemeral=True, thinking=True)
