@@ -61,6 +61,16 @@ For documentation-only changes, use filesystem checks and `git status --short`.
 - Skipped source warnings when no adapter is registered.
 - Listing history including sent rows.
 
+### Watch Health Diagnostics
+
+- Owned-watch health summaries.
+- Empty-history watch health summaries.
+- Ownership checks for health queries.
+- Watch-source link inspection, including disabled links.
+- Recent scrape attempt retrieval and status-specific latest attempts.
+- Source-test attempt summaries by source.
+- Pending, sent, excluded, and total listing status counts.
+
 ### Digest And Notification
 
 - Digest payload construction.
@@ -82,6 +92,7 @@ For documentation-only changes, use filesystem checks and `git status --short`.
 - Markdown link URL extraction.
 - Source-name validation for multi-URL input.
 - Compact source-add summaries.
+- Compact watch-health summaries that hide raw URLs.
 - Listing embed field shape.
 - Per-watch thread names, reuse, unarchiving, and replacement after deletion.
 
@@ -135,6 +146,8 @@ ready:
 - `/watch_source_add` accepts known supported source URLs.
 - `/watch_source_test` returns diagnostics for unsupported URLs.
 - `/watch_scrape_now` posts only new listing embeds.
+- `/watch_health` returns private diagnostics for the owned watch without raw
+  URLs or secrets.
 - Scheduled digest posts pending listings at the configured local time.
 - Empty due digests post a no-update message.
 - Duplicate listings are not resent by scheduled digests.

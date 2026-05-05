@@ -24,6 +24,7 @@ from car_watch_bot.scrapers.vettefinders import VetteFindersScraper
 from car_watch_bot.services.listing_service import ListingService
 from car_watch_bot.services.notification_service import NotificationService
 from car_watch_bot.services.source_service import SourceService
+from car_watch_bot.services.watch_health_service import WatchHealthService
 from car_watch_bot.services.watch_service import WatchService
 
 
@@ -94,7 +95,17 @@ def main() -> None:
         scraper_adapters=scraper_adapters,
         usd_to_aud_rate=settings.usd_to_aud_rate,
     )
-    client = create_bot_client(settings, watch_service, source_service, listing_service)
+    health_service = WatchHealthService(
+        session_factory=session_factory,
+        registered_source_kinds=set(scraper_adapters),
+    )
+    client = create_bot_client(
+        settings,
+        watch_service,
+        source_service,
+        listing_service,
+        health_service,
+    )
     notification_service = NotificationService(
         session_factory=session_factory,
         digest_sender=DiscordDigestSender(client),

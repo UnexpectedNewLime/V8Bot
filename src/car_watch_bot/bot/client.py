@@ -13,6 +13,7 @@ from car_watch_bot.config import Settings
 from car_watch_bot.core.models import DigestListing, DigestPayload, WatchDeliveryTarget
 from car_watch_bot.services.listing_service import ListingService
 from car_watch_bot.services.source_service import SourceService
+from car_watch_bot.services.watch_health_service import WatchHealthService
 from car_watch_bot.services.watch_service import WatchService
 
 
@@ -28,6 +29,7 @@ class CarWatchBotClient(discord.Client):
         watch_service: WatchService,
         source_service: SourceService,
         listing_service: ListingService,
+        health_service: WatchHealthService,
         scheduler: AsyncIOScheduler | None = None,
     ) -> None:
         intents = discord.Intents.default()
@@ -41,6 +43,7 @@ class CarWatchBotClient(discord.Client):
             watch_service,
             source_service,
             listing_service,
+            health_service,
         )
 
     async def setup_hook(self) -> None:
@@ -75,6 +78,7 @@ def create_bot_client(
     watch_service: WatchService,
     source_service: SourceService,
     listing_service: ListingService,
+    health_service: WatchHealthService,
     scheduler: AsyncIOScheduler | None = None,
 ) -> CarWatchBotClient:
     """Create the Discord client."""
@@ -84,6 +88,7 @@ def create_bot_client(
         watch_service=watch_service,
         source_service=source_service,
         listing_service=listing_service,
+        health_service=health_service,
         scheduler=scheduler,
     )
 
@@ -93,6 +98,7 @@ def run_bot(
     watch_service: WatchService,
     source_service: SourceService,
     listing_service: ListingService,
+    health_service: WatchHealthService,
     scheduler: AsyncIOScheduler | None = None,
 ) -> None:
     """Run the Discord bot."""
@@ -104,6 +110,7 @@ def run_bot(
         watch_service,
         source_service,
         listing_service,
+        health_service,
         scheduler,
     )
     client.run(settings.discord_bot_token)

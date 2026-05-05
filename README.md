@@ -111,6 +111,7 @@ The current Discord interface registers:
 - `/ping`
 - `/watch_add`
 - `/watch_list`
+- `/watch_health`
 - `/watch_remove`
 - `/watch_keyword_add`
 - `/watch_keyword_remove`
@@ -158,11 +159,16 @@ You can also run the flow manually:
 /watch_add
 /watch_source_add
 /watch_scrape_now
+/watch_health
 /watch_listings
 ```
 
 `/watch_source_add` accepts one or more URLs in its `url` field. The optional
 `name` field can only be used with a single URL.
+
+`/watch_health` shows a private diagnostics summary for one owned watch,
+including source counts, skipped or disabled sources, recent scrape status,
+source-test status, listing queue counts, and delivery channel/thread details.
 
 ## Local Scrape Flow Without Discord
 

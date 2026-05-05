@@ -4,6 +4,7 @@ from car_watch_bot.bot.client import create_bot_client
 from car_watch_bot.config import Settings
 from car_watch_bot.services.listing_service import ListingService
 from car_watch_bot.services.source_service import SourceService
+from car_watch_bot.services.watch_health_service import WatchHealthService
 from car_watch_bot.services.watch_service import WatchService
 
 
@@ -16,8 +17,18 @@ def test_create_bot_client_registers_expected_commands(db_session_factory) -> No
         scraper_adapters={},
         usd_to_aud_rate=settings.usd_to_aud_rate,
     )
+    health_service = WatchHealthService(
+        db_session_factory,
+        registered_source_kinds=set(),
+    )
 
-    client = create_bot_client(settings, watch_service, source_service, listing_service)
+    client = create_bot_client(
+        settings,
+        watch_service,
+        source_service,
+        listing_service,
+        health_service,
+    )
 
     command_names = {command.name for command in client.command_tree.get_commands()}
     assert command_names == {
@@ -30,6 +41,7 @@ def test_create_bot_client_registers_expected_commands(db_session_factory) -> No
         "watch_keyword_add",
         "watch_keyword_remove",
         "watch_list",
+        "watch_health",
         "watch_notify_time",
         "watch_remove",
         "watch_scrape_now",

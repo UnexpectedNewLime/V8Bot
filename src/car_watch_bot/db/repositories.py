@@ -5,7 +5,7 @@ from decimal import Decimal
 from hashlib import sha256
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from car_watch_bot.core.models import ListingCandidate, ScoreResult
@@ -235,6 +235,18 @@ class SourceRepository:
                     Source.is_active.is_(True),
                 )
                 .order_by(Source.id)
+            )
+        )
+
+    def list_watch_source_links(self, watch_id: int) -> list[WatchSource]:
+        """List all source links for a watch, including disabled links."""
+
+        return list(
+            self.session.scalars(
+                select(WatchSource)
+                .options(selectinload(WatchSource.source))
+                .where(WatchSource.watch_id == watch_id)
+                .order_by(WatchSource.id)
             )
         )
 
@@ -481,6 +493,16 @@ class ListingRepository:
             watch_listing.sent_at = datetime.utcnow()
         self.session.flush()
 
+    def count_statuses_for_watch(self, watch_id: int) -> dict[str, int]:
+        """Count watch-listing rows by delivery status."""
+
+        rows = self.session.execute(
+            select(WatchListing.status, func.count())
+            .where(WatchListing.watch_id == watch_id)
+            .group_by(WatchListing.status)
+        )
+        return {status: count for status, count in rows}
+
 
 class ScrapeAttemptRepository:
     """Persistence operations for scrape attempts."""
@@ -516,6 +538,44 @@ class ScrapeAttemptRepository:
         self.session.flush()
         return attempt
 
+    def get_latest_for_watch(
+        self,
+        watch_id: int,
+        status: str | None = None,
+    ) -> ScrapeAttempt | None:
+        """Return the most recent scrape attempt for a watch."""
+
+        statement = select(ScrapeAttempt).where(ScrapeAttempt.watch_id == watch_id)
+        if status is not None:
+            statement = statement.where(ScrapeAttempt.status == status)
+        return self.session.scalar(
+            statement.order_by(
+                ScrapeAttempt.finished_at.desc(),
+                ScrapeAttempt.started_at.desc(),
+                ScrapeAttempt.id.desc(),
+            ).limit(1)
+        )
+
+    def list_recent_for_watch(
+        self,
+        watch_id: int,
+        limit: int = 10,
+    ) -> list[ScrapeAttempt]:
+        """List recent scrape attempts for a watch."""
+
+        return list(
+            self.session.scalars(
+                select(ScrapeAttempt)
+                .where(ScrapeAttempt.watch_id == watch_id)
+                .order_by(
+                    ScrapeAttempt.finished_at.desc(),
+                    ScrapeAttempt.started_at.desc(),
+                    ScrapeAttempt.id.desc(),
+                )
+                .limit(limit)
+            )
+        )
+
 
 class SourceTestAttemptRepository:
     """Persistence operations for source test attempts."""
@@ -548,3 +608,32 @@ class SourceTestAttemptRepository:
         self.session.add(attempt)
         self.session.flush()
         return attempt
+
+    def latest_for_sources(
+        self,
+        user_id: int,
+        source_ids: list[int],
+    ) -> dict[int, SourceTestAttempt]:
+        """Return the latest source-test attempt for each source id."""
+
+        if not source_ids:
+            return {}
+        attempts = self.session.scalars(
+            select(SourceTestAttempt)
+            .where(
+                SourceTestAttempt.user_id == user_id,
+                SourceTestAttempt.source_id.in_(source_ids),
+            )
+            .order_by(
+                SourceTestAttempt.source_id,
+                SourceTestAttempt.finished_at.desc(),
+                SourceTestAttempt.started_at.desc(),
+                SourceTestAttempt.id.desc(),
+            )
+        )
+        latest_attempts: dict[int, SourceTestAttempt] = {}
+        for attempt in attempts:
+            if attempt.source_id is None or attempt.source_id in latest_attempts:
+                continue
+            latest_attempts[attempt.source_id] = attempt
+        return latest_attempts

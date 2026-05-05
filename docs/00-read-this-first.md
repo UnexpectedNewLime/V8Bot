@@ -32,6 +32,9 @@ describe the code that exists now.
   configured to reject unregistered source kinds.
 - Manual commands can scrape immediately and post new listing embeds to the
   watch thread. Posted listings are then marked sent.
+- Watch owners can inspect persisted watch health diagnostics, including recent
+  scrape attempts, source-test status, source skip reasons, listing status
+  counts, and delivery target details.
 - Scheduled scrape collection stores matching listings silently.
 - Scheduled digest checks post pending listings, or a no-update confirmation,
   when a watch's local notification time is due.

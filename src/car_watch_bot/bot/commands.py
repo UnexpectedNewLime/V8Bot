@@ -4,6 +4,7 @@ import logging
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import discord
@@ -19,6 +20,12 @@ from car_watch_bot.services.source_service import (
     SourceService,
     SourceSummary,
     SourceValidationError,
+)
+from car_watch_bot.services.watch_health_service import (
+    ScrapeAttemptSummary,
+    SourceHealthSummary,
+    WatchHealthService,
+    WatchHealthSummary,
 )
 from car_watch_bot.services.watch_service import (
     WatchNotFoundError,
@@ -48,6 +55,7 @@ def register_commands(
     watch_service: WatchService,
     source_service: SourceService,
     listing_service: ListingService,
+    health_service: WatchHealthService,
 ) -> None:
     """Register supported slash commands."""
 
@@ -148,6 +156,27 @@ def register_commands(
             return _format_watch_list(summaries)
 
         await _send_ephemeral_result(interaction, action, "failed to list watches")
+
+    @command_tree.command(name="watch_health", description="Show watch diagnostics.")
+    async def watch_health(interaction: discord.Interaction, watch_id: int) -> None:
+        async def action() -> str:
+            health = health_service.get_watch_health(str(interaction.user.id), watch_id)
+            logger.info(
+                "watch_health inspected watch_id=%s user_id=%s sources=%s "
+                "pending=%s sent=%s",
+                watch_id,
+                interaction.user.id,
+                health.source_count,
+                health.listing_counts.pending_digest,
+                health.listing_counts.sent,
+            )
+            return _format_watch_health(health)
+
+        await _send_ephemeral_result(
+            interaction,
+            action,
+            "failed to inspect watch health",
+        )
 
     @command_tree.command(name="watch_scrape_now", description="Scrape one watch now.")
     async def watch_scrape_now(interaction: discord.Interaction, watch_id: int) -> None:
@@ -689,6 +718,166 @@ def _format_watch_block(summary: WatchSummary) -> str:
             f"Sources: `{summary.active_sources_count}`",
         ]
     )
+
+
+def _format_watch_health(health: WatchHealthSummary) -> str:
+    """Format watch health diagnostics for Discord."""
+
+    listing_counts = health.listing_counts
+    lines = [
+        "**Watch health**",
+        (
+            f"`#{health.watch_id}` **{health.watch_query}** "
+            f"({_active_label(health.is_active)})"
+        ),
+        (
+            f"Notify: `{health.notify_time}` `{health.timezone}` | "
+            f"Last digest: `{_format_datetime(health.last_digest_sent_at)}`"
+        ),
+        (
+            f"Delivery: channel `{_optional_id(health.channel_id)}` | "
+            f"thread `{_optional_id(health.thread_id)}`"
+        ),
+        (
+            f"Sources: active `{health.active_source_count}` | "
+            f"skipped/disabled `{health.skipped_source_count}` | "
+            f"total `{health.source_count}`"
+        ),
+        (
+            f"Listings: pending `{listing_counts.pending_digest}` | "
+            f"sent `{listing_counts.sent}` | excluded `{listing_counts.excluded}` | "
+            f"total `{listing_counts.total}`"
+        ),
+    ]
+    if listing_counts.other:
+        lines.append(
+            "Other listing statuses: "
+            f"{_format_status_counts(listing_counts.other_statuses)}"
+        )
+
+    lines.extend(
+        [
+            "",
+            "**Scrapes**",
+            f"Last: {_format_scrape_attempt(health.last_scrape)}",
+            f"Success: {_format_scrape_attempt(health.last_success)}",
+            f"Failure: {_format_scrape_attempt(health.last_failure)}",
+            (
+                f"Recent `{health.recent_scrape_attempts}` attempts: "
+                f"seen `{health.recent_listings_seen}` | "
+                f"matched `{health.recent_listings_matched}` | "
+                f"created `{health.recent_listings_created}`"
+            ),
+            "",
+            "**Sources**",
+        ]
+    )
+    if not health.sources:
+        lines.append("none")
+        return "\n".join(lines)
+
+    max_sources = 8
+    lines.extend(
+        _format_source_health(source) for source in health.sources[:max_sources]
+    )
+    if len(health.sources) > max_sources:
+        lines.append(f"...and {len(health.sources) - max_sources} more sources")
+    return "\n".join(lines)
+
+
+def _format_scrape_attempt(attempt: ScrapeAttemptSummary | None) -> str:
+    """Format one scrape attempt summary."""
+
+    if attempt is None:
+        return "none"
+    source_label = f"source `#{attempt.source_id}`"
+    if attempt.source_name:
+        source_label = f"{source_label} **{attempt.source_name}**"
+    line = (
+        f"`{_format_datetime(attempt.finished_at)}` `{attempt.status}` "
+        f"{source_label} ({attempt.adapter_kind}) "
+        f"seen/matched/created "
+        f"`{attempt.listings_seen}/"
+        f"{attempt.listings_matched}/"
+        f"{attempt.listings_created}`"
+    )
+    if attempt.error_message:
+        line = f"{line}; {_safe_note(attempt.error_message)}"
+    return line
+
+
+def _format_source_health(source: SourceHealthSummary) -> str:
+    """Format one source health row."""
+
+    source_state = (
+        "ok"
+        if source.skipped_reason is None
+        else f"skipped: {source.skipped_reason}"
+    )
+    test_state = "test none"
+    if source.last_test_status is not None:
+        test_state = (
+            f"test `{source.last_test_status}` "
+            f"`{_format_datetime(source.last_test_finished_at)}`"
+        )
+    notes = [
+        note
+        for note in [*source.last_test_notes, source.last_test_error or ""]
+        if note and note not in HIDDEN_SOURCE_NOTES
+    ]
+    line = (
+        f"- `#{source.source_id}` **{source.name}** "
+        f"({source.kind}, {source.domain}): {source_state}; {test_state}"
+    )
+    if notes:
+        line = f"{line}; notes: {_comma_list([_safe_note(note) for note in notes[:2]])}"
+    return line
+
+
+def _format_status_counts(status_counts: dict[str, int]) -> str:
+    """Format non-standard listing status counts."""
+
+    return ", ".join(
+        f"{status} `{count}`" for status, count in sorted(status_counts.items())
+    )
+
+
+def _format_datetime(value: datetime | None) -> str:
+    """Format a datetime compactly for Discord text."""
+
+    if value is None:
+        return "none"
+    if value.tzinfo is not None:
+        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value.strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _optional_id(value: str | None) -> str:
+    """Format an optional Discord id."""
+
+    return value or "none"
+
+
+def _active_label(value: bool) -> str:
+    """Format active state."""
+
+    return "active" if value else "inactive"
+
+
+def _safe_note(value: str) -> str:
+    """Compact noisy diagnostics and avoid full URLs in Discord output."""
+
+    collapsed = " ".join(value.split())
+    collapsed = URL_PATTERN.sub(lambda match: _source_domain(match.group(0)), collapsed)
+    return _truncate(collapsed, 120)
+
+
+def _truncate(value: str, limit: int) -> str:
+    """Truncate long diagnostic notes."""
+
+    if len(value) <= limit:
+        return value
+    return value[: limit - 3].rstrip() + "..."
 
 
 def _format_scrape_now_result(result: ScrapeNowResult) -> str:

@@ -17,6 +17,7 @@ The current command tree contains:
 - `/ping`.
 - `/watch_add`.
 - `/watch_list`.
+- `/watch_health`.
 - `/watch_remove`.
 - `/watch_keyword_add`.
 - `/watch_keyword_remove`.
@@ -68,6 +69,25 @@ Lists the user's active watches with:
 - Notification time.
 - Preferred currency and distance unit.
 - Active source count.
+
+## `/watch_health`
+
+Options:
+
+- `watch_id`: required integer.
+
+Behavior:
+
+- Returns an ephemeral diagnostics summary for an owned active watch.
+- Shows delivery channel and thread ids when known.
+- Shows active, skipped, disabled, inactive, and no-adapter source counts.
+- Shows pending, sent, excluded, and total watch-listing counts.
+- Shows last scrape, last success, last failure, and recent scrape totals for
+  listings seen, matched, and created.
+- Shows compact per-source rows with domain, scrapeability state, recent source
+  test status, and safe warning/error notes.
+- Does not expose full source URLs, stack traces, secrets, or raw local
+  configuration values.
 
 ## `/watch_remove`
 

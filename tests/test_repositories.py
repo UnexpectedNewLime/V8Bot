@@ -8,7 +8,9 @@ from car_watch_bot.core.models import ListingCandidate, ScoreResult
 from car_watch_bot.db.database import create_database_engine, init_database
 from car_watch_bot.db.repositories import (
     ListingRepository,
+    ScrapeAttemptRepository,
     SourceRepository,
+    SourceTestAttemptRepository,
     UserRepository,
     WatchRepository,
 )
@@ -157,3 +159,61 @@ def test_unnotified_listing_retrieval_and_mark_notified(db_session) -> None:
     listings.mark_listings_as_notified(watch.id, [listing.id])
 
     assert listings.list_unnotified_for_watch(watch.id) == []
+    assert listings.count_statuses_for_watch(watch.id) == {"sent": 1}
+
+
+def test_diagnostic_repository_reads_return_recent_attempts_and_source_tests(
+    db_session,
+) -> None:
+    user = UserRepository(db_session).get_or_create_by_discord_id("123")
+    watch = WatchRepository(db_session).create_watch(
+        user_id=user.id,
+        name="C5 watch",
+        query="C5 Corvette",
+        included_keywords=["manual"],
+    )
+    source = SourceRepository(db_session).create_source(
+        name="Mock Cars",
+        kind="mock",
+        owner_user_id=user.id,
+        base_url="https://example.test/cars",
+    )
+    SourceRepository(db_session).add_source_to_watch(watch.id, source.id)
+    attempts = ScrapeAttemptRepository(db_session)
+    success_attempt = attempts.create_attempt(
+        watch_id=watch.id,
+        source_id=source.id,
+        status="success",
+        adapter_kind="mock",
+        listings_seen=3,
+        listings_matched=2,
+        listings_created=1,
+    )
+    failed_attempt = attempts.create_attempt(
+        watch_id=watch.id,
+        source_id=source.id,
+        status="failed",
+        adapter_kind="mock",
+        error_message="timeout",
+    )
+    SourceTestAttemptRepository(db_session).create_attempt(
+        user_id=user.id,
+        source_id=source.id,
+        url=source.base_url or "",
+        status="warning",
+        notes=["some listings are missing mileage"],
+        detected_links=[],
+    )
+
+    latest_tests = SourceTestAttemptRepository(db_session).latest_for_sources(
+        user.id,
+        [source.id],
+    )
+
+    watch_source_links = SourceRepository(db_session).list_watch_source_links(watch.id)
+
+    assert watch_source_links[0].source == source
+    assert attempts.get_latest_for_watch(watch.id) == failed_attempt
+    assert attempts.get_latest_for_watch(watch.id, status="success") == success_attempt
+    assert attempts.list_recent_for_watch(watch.id, limit=1) == [failed_attempt]
+    assert latest_tests[source.id].status == "warning"
