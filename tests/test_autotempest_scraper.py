@@ -194,6 +194,8 @@ def test_fetch_uses_queue_results_for_exact_vehicle_links() -> None:
     assert "Removable targa roof" in listings[0].description
     assert listings[0].raw_payload is not None
     assert listings[0].raw_payload["candidate_type"] == "queue_result"
+    assert listings[0].raw_payload["dealer_name"] == "Desert Cars"
+    assert listings[0].raw_payload["thumbnail_url"] == "https://images.example.test/c5-z06.jpg"
     assert "skipped Facebook Marketplace source" in scraper.last_warnings
     assert any("/queue-results" in request for request in requests)
 
