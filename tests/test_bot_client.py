@@ -30,21 +30,24 @@ def test_create_bot_client_registers_expected_commands(db_session_factory) -> No
         "watch_exclude_remove",
         "watch_keyword_add",
         "watch_keyword_remove",
+        "watch_edit",
         "watch_list",
         "watch_notify_time",
         "watch_remove",
         "watch_scrape_now",
+        "watch_show",
         "watch_listings",
         "watch_source_add",
         "watch_source_list",
         "watch_source_remove",
+        "watch_source_remove_menu",
         "watch_source_test",
     }
 
-    command_by_name = {
+    commands_by_name = {
         command.name: command for command in client.command_tree.get_commands()
     }
-    autotempest_command = command_by_name["watch_add_autotempest"]
+    autotempest_command = commands_by_name["watch_add_autotempest"]
     assert [parameter.name for parameter in autotempest_command.parameters] == [
         "make",
         "model",
@@ -58,3 +61,30 @@ def test_create_bot_client_registers_expected_commands(db_session_factory) -> No
         "exclude_keywords",
         "scrape_now",
     ]
+
+    watch_id_commands = {
+        "watch_currency",
+        "watch_distance_unit",
+        "watch_exclude_add",
+        "watch_exclude_remove",
+        "watch_edit",
+        "watch_keyword_add",
+        "watch_keyword_remove",
+        "watch_listings",
+        "watch_notify_time",
+        "watch_remove",
+        "watch_scrape_now",
+        "watch_show",
+        "watch_source_add",
+        "watch_source_list",
+        "watch_source_remove",
+        "watch_source_remove_menu",
+    }
+    for command_name in watch_id_commands:
+        assert commands_by_name[command_name]._params["watch_id"].autocomplete is not None
+    assert (
+        commands_by_name["watch_source_remove"]
+        ._params["source_id"]
+        .autocomplete
+        is not None
+    )
