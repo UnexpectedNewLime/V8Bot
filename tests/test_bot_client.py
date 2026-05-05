@@ -1,5 +1,6 @@
 """Tests for local Discord command registration."""
 
+from car_watch_bot.bot.commands import ScrapeNowMode
 from car_watch_bot.bot.client import create_bot_client
 from car_watch_bot.config import Settings
 from car_watch_bot.services.listing_service import ListingService
@@ -38,4 +39,17 @@ def test_create_bot_client_registers_expected_commands(db_session_factory) -> No
         "watch_source_list",
         "watch_source_remove",
         "watch_source_test",
+    }
+
+    scrape_command = next(
+        command
+        for command in client.command_tree.get_commands()
+        if command.name == "watch_scrape_now"
+    )
+    parameters = {parameter.name: parameter for parameter in scrape_command.parameters}
+    mode_parameter = parameters["mode"]
+    assert mode_parameter.required is False
+    assert mode_parameter.default == ScrapeNowMode.POST_AND_MARK_SEEN.value
+    assert {choice.value for choice in mode_parameter.choices} == {
+        mode.value for mode in ScrapeNowMode
     }

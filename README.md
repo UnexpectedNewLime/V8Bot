@@ -157,12 +157,16 @@ You can also run the flow manually:
 ```text
 /watch_add
 /watch_source_add
-/watch_scrape_now
+/watch_scrape_now mode: post_and_mark_seen
 /watch_listings
 ```
 
 `/watch_source_add` accepts one or more URLs in its `url` field. The optional
 `name` field can only be used with a single URL.
+`/watch_scrape_now` defaults to `post_and_mark_seen`, which posts public embeds
+and marks those listing ids sent. Use `preview_only` to inspect results privately
+without consuming scheduled digest state, or `post_but_keep_pending` to post
+public embeds while keeping the listings pending for the scheduled digest.
 
 ## Local Scrape Flow Without Discord
 

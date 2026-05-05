@@ -162,15 +162,26 @@ Behavior:
 Options:
 
 - `watch_id`: required integer.
+- `mode`: optional choice, default `post_and_mark_seen`.
+  - `preview_only`: scrape and show a compact private preview without posting
+    public embeds or marking listings sent.
+  - `post_and_mark_seen`: post public embeds and mark posted listing ids sent.
+  - `post_but_keep_pending`: post public embeds while leaving listing ids
+    pending for the scheduled digest.
 
 Behavior:
 
 - Scrapes each active enabled source attached to the owned watch when a matching
   adapter exists.
 - Skips sources with no adapter and reports warnings.
-- Posts newly pending listings as embeds in the watch thread.
-- Marks the posted listing ids sent.
-- Returns an ephemeral scrape summary.
+- Returns an ephemeral scrape summary that states whether pending digest state
+  was consumed.
+- Public-post modes send newly pending listings as embeds in the watch thread.
+- `post_and_mark_seen` marks the posted listing ids sent.
+- `preview_only` and `post_but_keep_pending` leave matching listing ids pending
+  so scheduled digests can still send them.
+- Preview responses use compact text rather than embeds because Discord
+  ephemeral responses have practical message and embed limits.
 
 ### `/watch_listings`
 

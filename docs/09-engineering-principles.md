@@ -47,8 +47,12 @@ Manual scrape flow:
 
 1. Discord command calls `ListingService.scrape_watch_now`.
 2. The same scrape service path stores matches.
-3. The command posts newly pending listings to the watch thread.
-4. The command marks those posted listings sent.
+3. The command chooses an explicit mode for preview, public posting, and
+   pending-state handling.
+4. `post_and_mark_seen` posts newly pending listings to the watch thread and
+   marks those posted listings sent.
+5. `preview_only` and `post_but_keep_pending` leave listings pending for the
+   scheduled digest.
 
 ## Idempotency
 

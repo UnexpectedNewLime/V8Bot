@@ -3,7 +3,12 @@
 import asyncio
 from decimal import Decimal
 
-from car_watch_bot.db.repositories import SourceRepository, UserRepository, WatchRepository
+from car_watch_bot.db.repositories import (
+    ListingRepository,
+    SourceRepository,
+    UserRepository,
+    WatchRepository,
+)
 from car_watch_bot.scrapers.mock import MockScraper
 from car_watch_bot.services.listing_service import ListingService
 from car_watch_bot.services.watch_service import WatchService
@@ -84,6 +89,18 @@ def test_watch_listings_includes_sent_listing_history(db_session_factory) -> Non
     listings = service.list_watch_listings("123", 1)
 
     assert len(listings) == 3
+
+
+def test_mark_watch_listings_sent_consumes_pending_digest_rows(db_session_factory) -> None:
+    test_scrape_watch_now_stores_pending_listings(db_session_factory)
+    service = _listing_service(db_session_factory)
+
+    service.mark_watch_listings_sent("123", 1, [1, 2, 3])
+
+    with db_session_factory() as session:
+        pending = ListingRepository(session).list_unnotified_for_watch(1)
+
+    assert pending == []
 
 
 def test_scrape_watch_now_reports_skipped_sources(db_session_factory) -> None:

@@ -133,7 +133,8 @@ Current services:
 - `SourceService`: validates URLs, infers source kinds, runs source tests,
   creates/reuses sources, and attaches/removes them from watches.
 - `ListingService`: runs user-triggered scrapes, lists visible watch listings,
-  and marks posted listings sent.
+  and marks posted listings sent when the command mode consumes pending digest
+  state.
 - `ScrapeService`: runs scheduled or explicit scrape orchestration for active
   watch-source pairs.
 - `DigestService`: builds digest/listing payloads from stored rows and marks

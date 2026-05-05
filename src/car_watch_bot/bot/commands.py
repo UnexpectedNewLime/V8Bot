@@ -4,6 +4,7 @@ import logging
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from enum import Enum
 from urllib.parse import urlparse
 
 import discord
@@ -33,6 +34,30 @@ DISCORD_MESSAGE_LIMIT = 2000
 DISCORD_SAFE_MESSAGE_LIMIT = 1900
 URL_PATTERN = re.compile(r"https?://[^\s<>\]\),]+")
 HIDDEN_SOURCE_NOTES = {"skipped Facebook Marketplace source"}
+
+
+class ScrapeNowMode(str, Enum):
+    """Manual scrape delivery and pending-state behavior."""
+
+    PREVIEW_ONLY = "preview_only"
+    POST_AND_MARK_SEEN = "post_and_mark_seen"
+    POST_BUT_KEEP_PENDING = "post_but_keep_pending"
+
+
+SCRAPE_NOW_MODE_CHOICES = [
+    app_commands.Choice(
+        name="Post and mark seen",
+        value=ScrapeNowMode.POST_AND_MARK_SEEN.value,
+    ),
+    app_commands.Choice(
+        name="Preview only",
+        value=ScrapeNowMode.PREVIEW_ONLY.value,
+    ),
+    app_commands.Choice(
+        name="Post but keep pending",
+        value=ScrapeNowMode.POST_BUT_KEEP_PENDING.value,
+    ),
+]
 
 
 @dataclass(frozen=True)
@@ -150,45 +175,22 @@ def register_commands(
         await _send_ephemeral_result(interaction, action, "failed to list watches")
 
     @command_tree.command(name="watch_scrape_now", description="Scrape one watch now.")
-    async def watch_scrape_now(interaction: discord.Interaction, watch_id: int) -> None:
+    @app_commands.describe(
+        mode="Choose whether results consume scheduled digest pending state.",
+    )
+    @app_commands.choices(mode=SCRAPE_NOW_MODE_CHOICES)
+    async def watch_scrape_now(
+        interaction: discord.Interaction,
+        watch_id: int,
+        mode: str = ScrapeNowMode.POST_AND_MARK_SEEN.value,
+    ) -> None:
         async def action() -> str:
-            result = await listing_service.scrape_watch_now(
-                str(interaction.user.id),
-                watch_id,
-            )
-            logger.info(
-                "watch_scrape_now completed watch_id=%s user_id=%s sources_seen=%s sources_scraped=%s listings_created=%s pending=%s",
-                watch_id,
-                interaction.user.id,
-                result.sources_seen,
-                result.sources_scraped,
-                result.listings_created,
-                result.pending_listings,
-            )
-            listings = listing_service.list_watch_listings(
-                str(interaction.user.id),
-                watch_id,
-                listing_ids=result.new_listing_ids,
-            )
-            await _send_public_listing_embeds(
-                interaction,
-                watch_service,
-                str(interaction.user.id),
-                watch_id,
-                listings,
-                heading=f"Watch {watch_id}: {len(listings)} new listings",
-                empty_message=f"Watch {watch_id}: scrape complete, no new listings.",
-            )
-            listing_service.mark_watch_listings_sent(
-                str(interaction.user.id),
-                watch_id,
-                result.new_listing_ids,
-            )
-            return "\n".join(
-                [
-                    _format_scrape_now_result(result),
-                    f"posted new listing messages: {len(listings)}",
-                ]
+            return await _run_watch_scrape_now(
+                interaction=interaction,
+                watch_service=watch_service,
+                listing_service=listing_service,
+                watch_id=watch_id,
+                mode=_coerce_scrape_now_mode(mode),
             )
 
         await _send_ephemeral_result(interaction, action, "failed to scrape watch")
@@ -421,6 +423,87 @@ def register_commands(
             action,
             "failed to update distance unit",
         )
+
+
+def _coerce_scrape_now_mode(raw_mode: str) -> ScrapeNowMode:
+    """Validate a scrape-now mode from Discord."""
+
+    try:
+        return ScrapeNowMode(raw_mode)
+    except ValueError as exc:
+        modes = ", ".join(mode.value for mode in ScrapeNowMode)
+        raise WatchValidationError(f"mode must be one of: {modes}") from exc
+
+
+async def _run_watch_scrape_now(
+    *,
+    interaction: discord.Interaction,
+    watch_service: WatchService,
+    listing_service: ListingService,
+    watch_id: int,
+    mode: ScrapeNowMode,
+) -> str:
+    """Run manual scraping with explicit preview/post state semantics."""
+
+    discord_user_id = str(interaction.user.id)
+    result = await listing_service.scrape_watch_now(discord_user_id, watch_id)
+    logger.info(
+        "watch_scrape_now completed watch_id=%s user_id=%s mode=%s "
+        "sources_seen=%s sources_scraped=%s listings_created=%s pending=%s",
+        watch_id,
+        interaction.user.id,
+        mode.value,
+        result.sources_seen,
+        result.sources_scraped,
+        result.listings_created,
+        result.pending_listings,
+    )
+    listings = listing_service.list_watch_listings(
+        discord_user_id,
+        watch_id,
+        listing_ids=result.new_listing_ids,
+    )
+    posted_count = 0
+    if _scrape_now_posts_publicly(mode):
+        await _send_public_listing_embeds(
+            interaction,
+            watch_service,
+            discord_user_id,
+            watch_id,
+            listings,
+            heading=f"Watch {watch_id}: {len(listings)} new listings",
+            empty_message=f"Watch {watch_id}: scrape complete, no new listings.",
+        )
+        posted_count = len(listings)
+
+    if _scrape_now_marks_sent(mode):
+        listing_service.mark_watch_listings_sent(
+            discord_user_id,
+            watch_id,
+            result.new_listing_ids,
+        )
+
+    return _format_scrape_now_mode_result(
+        result=result,
+        listings=listings,
+        mode=mode,
+        posted_count=posted_count,
+    )
+
+
+def _scrape_now_posts_publicly(mode: ScrapeNowMode) -> bool:
+    """Return whether a manual scrape mode posts to the watch thread."""
+
+    return mode in {
+        ScrapeNowMode.POST_AND_MARK_SEEN,
+        ScrapeNowMode.POST_BUT_KEEP_PENDING,
+    }
+
+
+def _scrape_now_marks_sent(mode: ScrapeNowMode) -> bool:
+    """Return whether a manual scrape mode consumes pending digest state."""
+
+    return mode == ScrapeNowMode.POST_AND_MARK_SEEN
 
 
 async def _send_ephemeral_result(
@@ -707,6 +790,47 @@ def _format_scrape_now_result(result: ScrapeNowResult) -> str:
     ]
     if result.warnings:
         lines.append(f"Warnings: {_comma_list(result.warnings)}")
+    return "\n".join(lines)
+
+
+def _format_scrape_now_mode_result(
+    *,
+    result: ScrapeNowResult,
+    listings: list[DigestListing],
+    mode: ScrapeNowMode,
+    posted_count: int,
+) -> str:
+    """Format scrape-now result with explicit mode outcome."""
+
+    lines = [
+        _format_scrape_now_result(result),
+        f"Mode: `{mode.value}`",
+    ]
+    if mode == ScrapeNowMode.PREVIEW_ONLY:
+        lines.extend(
+            [
+                f"Previewed new listings: `{len(listings)}`",
+                "Pending digest state: kept; nothing was posted publicly.",
+            ]
+        )
+        if listings:
+            lines.extend(["", "**Preview**", _format_watch_listings(result.watch_id, listings)])
+        else:
+            lines.append("No new listings to preview.")
+        return "\n".join(lines)
+
+    lines.append(f"Posted new listing messages: `{posted_count}`")
+    if mode == ScrapeNowMode.POST_AND_MARK_SEEN and posted_count:
+        lines.append(
+            "Pending digest state: consumed for posted listing ids; "
+            "scheduled digests will skip them."
+        )
+    elif mode == ScrapeNowMode.POST_AND_MARK_SEEN:
+        lines.append("Pending digest state: unchanged; no new listing ids were posted.")
+    else:
+        lines.append(
+            "Pending digest state: kept; scheduled digests can still send these listings."
+        )
     return "\n".join(lines)
 
 

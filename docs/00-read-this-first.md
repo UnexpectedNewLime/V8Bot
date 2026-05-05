@@ -30,8 +30,10 @@ describe the code that exists now.
   `corvette_magazine`, and `vettefinders`.
 - Unsupported URLs can be tested diagnostically, but runtime source addition is
   configured to reject unregistered source kinds.
-- Manual commands can scrape immediately and post new listing embeds to the
-  watch thread. Posted listings are then marked sent.
+- Manual commands can scrape immediately. `/watch_scrape_now` can preview
+  privately, post and mark seen, or post while leaving listings pending for the
+  scheduled digest. Its default still posts new listing embeds to the watch
+  thread and marks posted listings sent.
 - Scheduled scrape collection stores matching listings silently.
 - Scheduled digest checks post pending listings, or a no-update confirmation,
   when a watch's local notification time is due.

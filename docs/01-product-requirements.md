@@ -96,9 +96,12 @@ digest timestamp.
 Manual user-triggered scraping is intentionally more immediate:
 
 - `/watch_add` defaults `scrape_now` to true when source URLs are supplied.
-- `/watch_scrape_now` scrapes one owned watch immediately.
-- New listings from those manual flows are posted as embeds to the watch thread
-  and then marked sent.
+- `/watch_scrape_now` scrapes one owned watch immediately and offers explicit
+  modes: `preview_only`, `post_and_mark_seen`, and `post_but_keep_pending`.
+- `post_and_mark_seen` is the default and preserves the original behavior:
+  new listings are posted as embeds to the watch thread and then marked sent.
+- `preview_only` and `post_but_keep_pending` leave matching rows pending for a
+  later scheduled digest.
 - `/watch_listings` posts visible listing history, including sent listings.
 
 ## Success Criteria
