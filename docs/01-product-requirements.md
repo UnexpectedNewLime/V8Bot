@@ -29,6 +29,8 @@ watch-specific Discord thread.
   - Corvette Magazine classifieds.
   - VetteFinders.
 - Diagnostic testing for unsupported URLs.
+- Carsales URL recognition for diagnostic testing; production scraping remains
+  disabled while polite static requests return a JS/ad-blocker challenge page.
 - User-triggered immediate scraping through `/watch_scrape_now` and the
   `scrape_now` option on `/watch_add`.
 - Scheduled digests at each watch's notification time.
@@ -43,7 +45,7 @@ watch-specific Discord thread.
 - Browser automation or challenge bypassing.
 - Direct Cars.com, Gateway Classic Cars, or Streetside Classics scraping while
   polite requests receive challenge responses.
-- Carsales scraping until a concrete target URL and permission posture exist.
+- Carsales scraping until a viable non-challenge static response exists.
 - A user-facing web dashboard.
 - Payment, subscription, or SaaS management features.
 - Reusable plugin architecture.
@@ -75,6 +77,8 @@ Users attach sources to watches with `/watch_source_add` or during
 - `cars-on-line.com` -> `cars_on_line`.
 - `corvette-mag.com` -> `corvette_magazine`.
 - `vettefinders.com` -> `vettefinders`.
+- `carsales.com.au` -> `carsales` diagnostic-only; no runtime adapter is
+  registered yet.
 - Other domains -> `custom_website`.
 
 Runtime source addition is configured with `allow_unregistered_sources=False`,

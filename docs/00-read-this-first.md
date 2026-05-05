@@ -28,6 +28,9 @@ describe the code that exists now.
   from the domain and made unique per user.
 - Registered scheduled source kinds are `mock`, `autotempest`, `cars_on_line`,
   `corvette_magazine`, and `vettefinders`.
+- Carsales URLs are recognized as the `carsales` kind for diagnostics, but no
+  Carsales adapter is registered while polite static requests return a
+  JS/ad-blocker challenge instead of listing markup.
 - Unsupported URLs can be tested diagnostically, but runtime source addition is
   configured to reject unregistered source kinds.
 - Manual commands can scrape immediately and post new listing embeds to the
@@ -62,8 +65,9 @@ describe the code that exists now.
   handles same-currency values and USD to AUD through `USD_TO_AUD_RATE`.
 - Direct Cars.com, Gateway Classic Cars, and Streetside Classics adapters are
   not registered because polite HTTP requests receive challenge responses.
-- Carsales has no adapter because there is not yet a concrete target URL and
-  permission posture.
+- Carsales has a concrete target URL, but polite static access returned HTTP 403
+  with a JS/ad-blocker challenge page, so it remains diagnostic-only until a
+  viable static path exists.
 
 ## Development Defaults
 

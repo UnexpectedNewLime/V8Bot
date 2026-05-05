@@ -12,9 +12,12 @@ Current source status:
 - AutoTempest supports static/queue result scraping.
 - Cars On Line, Corvette Magazine classifieds, and VetteFinders support static
   HTML scraping.
+- Carsales URLs are recognized as `carsales` for diagnostics, but are not
+  registered for scheduled scraping because a polite static request to the
+  concrete Carsales search URL returned a JS/ad-blocker challenge page instead
+  of listing markup.
 - Cars.com, Gateway Classic Cars, and Streetside Classics are not registered
   because simple polite HTTP requests currently receive challenge responses.
-- Carsales still needs a concrete target URL before implementation.
 - Facebook Marketplace is not supported in the MVP.
 
 ## Getting Started For Development

@@ -2,6 +2,7 @@
 
 import asyncio
 from decimal import Decimal
+from urllib.parse import urlparse
 
 import pytest
 from sqlalchemy import select
@@ -102,6 +103,37 @@ class DiagnosticMockScraper:
                 "links found: 1",
             ],
             errors=[],
+        )
+
+
+class DomainDiagnosticMockScraper:
+    """Unsupported-domain diagnostic scraper that reflects the requested URL."""
+
+    def __init__(self) -> None:
+        self.request_url: str | None = None
+
+    async def fetch_listings(self, request: ScrapeRequest) -> list[ListingCandidate]:
+        """Capture the diagnostic URL and return no candidates."""
+
+        self.request_url = request.base_url
+        return []
+
+    def build_source_test_result(
+        self,
+        listings: list[ListingCandidate],
+    ) -> object:
+        """Return a diagnostic result for the captured domain."""
+
+        domain = urlparse(self.request_url or "").netloc.casefold() or "unknown domain"
+        return SourceTestResult(
+            url_accepted=False,
+            listings_found=len(listings),
+            title_parsing_worked=False,
+            link_parsing_worked=False,
+            price_parsing_worked=False,
+            mileage_parsing_worked=False,
+            warnings=[f"domain not supported for scheduled scraping: {domain}"],
+            errors=["polite fetch failed with HTTP 403"],
         )
 
 
@@ -414,6 +446,38 @@ def test_add_known_static_source_uses_registered_kind(
     assert result.source.kind == expected_kind
 
 
+def test_add_carsales_source_uses_carsales_kind_when_adapter_is_injected(
+    db_session_factory,
+) -> None:
+    watch_service = WatchService(db_session_factory)
+    watch = watch_service.create_watch(
+        discord_user_id="123",
+        car_query="C5 Corvette",
+        keywords="manual",
+        exclude_keywords="",
+        notify_time="09:30",
+    )
+    source_service = SourceService(
+        db_session_factory,
+        source_test_scrapers={"carsales": CompleteMockScraper()},
+        allow_unregistered_sources=False,
+    )
+
+    result = asyncio.run(
+        source_service.add_source_to_watch(
+            discord_user_id="123",
+            watch_id=watch.watch_id,
+            name="Carsales",
+            url=(
+                "https://www.carsales.com.au/cars/chevrolet/corvette/"
+                "c5-series/between-30000-45000/"
+            ),
+        )
+    )
+
+    assert result.source.kind == "carsales"
+
+
 def test_autotempest_source_test_uses_registered_adapter(db_session_factory) -> None:
     with db_session_factory() as session:
         user = UserRepository(session).get_or_create_by_discord_id("123")
@@ -462,6 +526,38 @@ def test_unregistered_source_test_uses_diagnostic_scraper_when_add_is_disabled(
     assert result.errors == []
     assert "domain not supported for scheduled scraping: example.test" in result.warnings
     assert result.listings_found == 1
+
+
+def test_carsales_source_test_uses_diagnostic_when_adapter_not_registered(
+    db_session_factory,
+) -> None:
+    with db_session_factory() as session:
+        user = UserRepository(session).get_or_create_by_discord_id("123")
+        session.commit()
+    source_service = SourceService(
+        db_session_factory,
+        source_test_scrapers={},
+        source_diagnostic_scraper=DomainDiagnosticMockScraper(),
+        allow_unregistered_sources=False,
+    )
+
+    result = asyncio.run(
+        source_service.test_source_url(
+            user.discord_user_id,
+            (
+                "https://www.carsales.com.au/cars/chevrolet/corvette/"
+                "c5-series/between-30000-45000/"
+            ),
+        )
+    )
+
+    assert result.url_accepted is False
+    assert result.listings_found == 0
+    assert (
+        "domain not supported for scheduled scraping: www.carsales.com.au"
+        in result.warnings
+    )
+    assert result.errors == ["polite fetch failed with HTTP 403"]
 
 
 def test_remove_source_from_watch(db_session_factory) -> None:
@@ -543,6 +639,42 @@ def test_add_source_rejects_unregistered_sources_when_disabled(
                 watch_id=watch.watch_id,
                 name=None,
                 url="https://www.example.test/cars",
+            )
+        )
+
+    assert source_service.list_sources_for_watch("123", watch.watch_id) == []
+
+
+def test_add_carsales_source_rejects_when_no_adapter_registered(
+    db_session_factory,
+) -> None:
+    watch_service = WatchService(db_session_factory)
+    watch = watch_service.create_watch(
+        discord_user_id="123",
+        car_query="C5 Corvette",
+        keywords="manual",
+        exclude_keywords="",
+        notify_time="09:30",
+    )
+    source_service = SourceService(
+        db_session_factory,
+        source_test_scrapers={},
+        allow_unregistered_sources=False,
+    )
+
+    with pytest.raises(
+        SourceValidationError,
+        match="no scraper adapter is registered for carsales",
+    ):
+        asyncio.run(
+            source_service.add_source_to_watch(
+                discord_user_id="123",
+                watch_id=watch.watch_id,
+                name=None,
+                url=(
+                    "https://www.carsales.com.au/cars/chevrolet/corvette/"
+                    "c5-series/between-30000-45000/"
+                ),
             )
         )
 

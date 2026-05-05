@@ -396,4 +396,6 @@ def _source_kind_for_url(url: str) -> str:
         return "corvette_magazine"
     if host.endswith("vettefinders.com"):
         return "vettefinders"
+    if host.endswith("carsales.com.au"):
+        return "carsales"
     return "custom_website"

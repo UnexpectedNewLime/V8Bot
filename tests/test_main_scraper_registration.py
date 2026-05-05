@@ -21,3 +21,15 @@ def test_runtime_scraper_adapters_include_static_sources() -> None:
         "mock",
         "vettefinders",
     }
+
+
+def test_runtime_scraper_adapters_do_not_register_carsales_until_static_access_is_viable() -> None:
+    settings = SimpleNamespace(
+        scraper_user_agent="V8Bot test",
+        scraper_timeout_seconds=10.0,
+        scraper_min_interval_seconds=0.0,
+    )
+
+    adapters = _scraper_adapters(settings)
+
+    assert "carsales" not in adapters

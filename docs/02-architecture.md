@@ -105,6 +105,10 @@ Runtime scraper adapters are currently registered for:
 - `corvette_magazine`.
 - `vettefinders`.
 
+Carsales URLs are recognized as the `carsales` source kind, but no runtime
+adapter is registered while polite static requests return a JS/ad-blocker
+challenge page. They remain diagnostic-only.
+
 `SourceService` is configured at runtime with `allow_unregistered_sources=False`.
 That means unsupported domains can be tested diagnostically with
 `/watch_source_test`, but they cannot be attached to watches for scheduled

@@ -22,11 +22,13 @@ There is no browser automation, login flow, or challenge bypass.
 
 Direct Cars.com, Gateway Classic Cars, and Streetside Classics adapters are not
 registered because simple polite HTTP requests currently receive challenge
-responses. Carsales is not registered because there is no concrete target URL
-and permission posture yet.
+responses. Carsales URLs are recognized as `carsales`, but no adapter is
+registered because a polite static request to the concrete C5 search URL
+returned HTTP 403 with a JS/ad-blocker challenge page instead of listing markup.
 
-Unsupported URLs are classified as `custom_website`. Runtime source addition
-rejects unregistered source kinds. `/watch_source_test` can still run
+Unsupported URLs are classified as `custom_website`; Carsales is classified as
+`carsales` so failures are specific. Runtime source addition rejects
+unregistered source kinds. `/watch_source_test` can still run
 `DiagnosticScraper`, which makes a single polite fetch, reports page-level
 warnings, and samples links without enabling scheduled scraping.
 

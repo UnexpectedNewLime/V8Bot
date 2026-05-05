@@ -44,7 +44,7 @@ For documentation-only changes, use filesystem checks and `git status --short`.
 - Existing source reuse for the same URL.
 - Duplicate name rejection for a different URL.
 - Known source-kind inference for AutoTempest, Cars On Line, Corvette Magazine,
-  and VetteFinders.
+  VetteFinders, and diagnostic-only Carsales.
 - Diagnostic source tests for unsupported domains.
 - Runtime rejection of unregistered source kinds when disabled.
 - Source removal from a watch.
@@ -95,6 +95,8 @@ For documentation-only changes, use filesystem checks and `git status --short`.
 - Cars On Line fixture parsing.
 - VetteFinders fixture parsing.
 - Corvette Magazine fixture parsing.
+- Carsales diagnostic-only classification and non-registration while static
+  access is challenge-blocked.
 - Static adapter mocked transport behavior.
 - Diagnostic scraper warnings and sampled links.
 

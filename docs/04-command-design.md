@@ -116,6 +116,8 @@ Behavior:
 - Reports per-URL add failures without exposing full raw URLs in compact
   summaries.
 - Runtime app configuration rejects unregistered source kinds.
+- Carsales URLs are recognized as `carsales`, but are rejected for attachment
+  until a non-challenge static adapter can be registered.
 
 ### `/watch_source_list`
 
@@ -152,6 +154,8 @@ Behavior:
 - Known source kinds use their registered adapter.
 - Unsupported domains use the diagnostic scraper and return "Diagnostic only"
   unless a custom test adapter is injected.
+- Carsales currently uses diagnostic behavior because it is recognized but not
+  registered for scheduled scraping.
 - Facebook URLs are rejected.
 - Source tests never create listing rows.
 
