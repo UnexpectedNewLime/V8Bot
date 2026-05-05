@@ -8,6 +8,10 @@ from discord import app_commands
 
 from car_watch_bot.bot.commands import register_commands
 from car_watch_bot.bot.embeds import build_listing_embed
+from car_watch_bot.bot.listing_actions import (
+    ListingActionDynamicItem,
+    build_listing_action_view,
+)
 from car_watch_bot.bot.watch_threads import resolve_watch_thread, send_to_watch_thread
 from car_watch_bot.config import Settings
 from car_watch_bot.core.models import DigestListing, DigestPayload, WatchDeliveryTarget
@@ -34,8 +38,11 @@ class CarWatchBotClient(discord.Client):
         super().__init__(intents=intents)
         self.settings = settings
         self.scheduler = scheduler
+        self.watch_service = watch_service
+        self.listing_service = listing_service
         self.command_tree = app_commands.CommandTree(self)
         self._commands_synced = False
+        self.add_dynamic_items(ListingActionDynamicItem)
         register_commands(
             self.command_tree,
             watch_service,
@@ -123,8 +130,16 @@ class DiscordDigestSender:
         """Send one digest payload to a watch thread."""
 
         thread = await resolve_watch_thread(self.client, target)
-        for embed in _build_digest_embeds(digest):
-            await thread.send(embed=embed, silent=True)
+        for listing in digest.listings:
+            await thread.send(
+                embed=build_listing_embed(
+                    listing=listing,
+                    heading=f"{digest.watch_name}: {digest.listing_count} new listings",
+                    query=digest.watch_query,
+                ),
+                view=build_listing_action_view(target.watch_id, listing.listing_id),
+                silent=True,
+            )
         return str(thread.id)
 
     async def send_no_updates(self, target: WatchDeliveryTarget) -> str | None:
@@ -154,14 +169,22 @@ def _format_listing_embed_value(listing: DigestListing) -> str:
     """Format one digest listing as an embed field value."""
 
     reasons = ", ".join(listing.score_reasons) or "none"
-    return "\n".join(
-        [
-            f"Source: {listing.source_name}",
-            f"Original price: {listing.original_price}",
-            f"Converted price: {listing.converted_price}",
-            f"Original mileage: {listing.original_mileage}",
-            f"Converted mileage: {listing.converted_mileage}",
-            f"Score reasons: {reasons}",
-            f"Link: {listing.url}",
-        ]
-    )[:1024]
+    lines = [
+        f"Source: {listing.source_name}",
+        f"Original price: {listing.original_price}",
+        f"Converted price: {listing.converted_price}",
+        f"Original mileage: {listing.original_mileage}",
+        f"Converted mileage: {listing.converted_mileage}",
+    ]
+    if listing.price_change:
+        lines.append(f"Price change: {listing.price_change}")
+    if listing.location:
+        lines.append(f"Location: {listing.location}")
+    if listing.first_seen:
+        lines.append(f"First seen: {listing.first_seen}")
+    if listing.last_seen:
+        lines.append(f"Last seen: {listing.last_seen}")
+    if listing.seller_info:
+        lines.append(f"Seller info: {listing.seller_info}")
+    lines.extend([f"Score reasons: {reasons}", f"Link: {listing.url}"])
+    return "\n".join(lines)[:1024]

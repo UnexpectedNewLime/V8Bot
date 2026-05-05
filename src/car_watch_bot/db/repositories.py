@@ -8,6 +8,14 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from car_watch_bot.core.listing_status import (
+    DELIVERABLE_LISTING_STATUSES,
+    LISTING_STATUS_EXCLUDED,
+    LISTING_STATUS_PENDING_DIGEST,
+    LISTING_STATUS_SENT,
+    LISTING_STATUS_STARRED,
+    VISIBLE_LISTING_STATUSES,
+)
 from car_watch_bot.core.models import ListingCandidate, ScoreResult
 from car_watch_bot.db.models import (
     Listing,
@@ -25,6 +33,124 @@ def _content_hash(title: str, url: str) -> str:
     """Create a stable content hash for a listing."""
 
     return sha256(f"{title.casefold()}|{url}".encode("utf-8")).hexdigest()
+
+
+FIRST_SEEN_PRICE_AMOUNT_KEY = "v8bot_first_seen_price_amount"
+FIRST_SEEN_PRICE_CURRENCY_KEY = "v8bot_first_seen_price_currency"
+PREVIOUS_PRICE_AMOUNT_KEY = "v8bot_previous_price_amount"
+PREVIOUS_PRICE_CURRENCY_KEY = "v8bot_previous_price_currency"
+PRICE_CHANGED_AT_KEY = "v8bot_price_changed_at"
+
+
+def _listing_raw_payload_for_insert(listing: ListingCandidate) -> dict[str, Any]:
+    """Return scraper metadata augmented with V8Bot price history."""
+
+    raw_payload = _payload_dict(listing.raw_payload)
+    _set_price_snapshot(
+        raw_payload,
+        FIRST_SEEN_PRICE_AMOUNT_KEY,
+        FIRST_SEEN_PRICE_CURRENCY_KEY,
+        listing.price_amount,
+        listing.price_currency,
+    )
+    return raw_payload
+
+
+def _listing_raw_payload_for_update(
+    db_listing: "Listing",
+    listing: ListingCandidate,
+    old_price_amount: Decimal | None,
+    old_price_currency: str | None,
+) -> dict[str, Any]:
+    """Return refreshed scraper metadata preserving known price history."""
+
+    raw_payload = _payload_dict(listing.raw_payload)
+    existing_payload = _payload_dict(db_listing.raw_payload)
+    if _has_price_snapshot(
+        existing_payload,
+        FIRST_SEEN_PRICE_AMOUNT_KEY,
+        FIRST_SEEN_PRICE_CURRENCY_KEY,
+    ):
+        raw_payload[FIRST_SEEN_PRICE_AMOUNT_KEY] = existing_payload[
+            FIRST_SEEN_PRICE_AMOUNT_KEY
+        ]
+        raw_payload[FIRST_SEEN_PRICE_CURRENCY_KEY] = existing_payload[
+            FIRST_SEEN_PRICE_CURRENCY_KEY
+        ]
+    else:
+        _set_price_snapshot(
+            raw_payload,
+            FIRST_SEEN_PRICE_AMOUNT_KEY,
+            FIRST_SEEN_PRICE_CURRENCY_KEY,
+            old_price_amount,
+            old_price_currency,
+        )
+
+    if _price_changed(
+        old_price_amount,
+        old_price_currency,
+        listing.price_amount,
+        listing.price_currency,
+    ):
+        _set_price_snapshot(
+            raw_payload,
+            PREVIOUS_PRICE_AMOUNT_KEY,
+            PREVIOUS_PRICE_CURRENCY_KEY,
+            old_price_amount,
+            old_price_currency,
+        )
+        raw_payload[PRICE_CHANGED_AT_KEY] = (
+            datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        )
+    return raw_payload
+
+
+def _payload_dict(payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Return a mutable JSON object payload."""
+
+    if not isinstance(payload, dict):
+        return {}
+    return dict(payload)
+
+
+def _set_price_snapshot(
+    payload: dict[str, Any],
+    amount_key: str,
+    currency_key: str,
+    amount: Decimal | None,
+    currency: str | None,
+) -> None:
+    """Store a JSON-safe price snapshot when complete."""
+
+    if amount is None or not currency:
+        return
+    payload[amount_key] = f"{amount:.2f}"
+    payload[currency_key] = currency
+
+
+def _has_price_snapshot(
+    payload: dict[str, Any],
+    amount_key: str,
+    currency_key: str,
+) -> bool:
+    """Return whether a payload has a complete price snapshot."""
+
+    return bool(payload.get(amount_key) and payload.get(currency_key))
+
+
+def _price_changed(
+    old_amount: Decimal | None,
+    old_currency: str | None,
+    new_amount: Decimal | None,
+    new_currency: str | None,
+) -> bool:
+    """Return whether two complete price values differ."""
+
+    if old_amount is None or new_amount is None:
+        return False
+    if not old_currency or not new_currency:
+        return False
+    return old_amount != new_amount or old_currency != new_currency
 
 
 class UserRepository:
@@ -95,7 +221,9 @@ class WatchRepository:
         return list(
             self.session.scalars(
                 select(Watch)
-                .options(selectinload(Watch.watch_sources).selectinload(WatchSource.source))
+                .options(
+                    selectinload(Watch.watch_sources).selectinload(WatchSource.source)
+                )
                 .where(Watch.user_id == user_id, Watch.is_active.is_(True))
                 .order_by(Watch.id)
             )
@@ -114,13 +242,27 @@ class WatchRepository:
             )
         )
 
+    def get_for_user(self, watch_id: int, user_id: int) -> Watch | None:
+        """Return a watch owned by a user, including inactive watches."""
+
+        return self.session.scalar(
+            select(Watch)
+            .options(selectinload(Watch.watch_sources).selectinload(WatchSource.source))
+            .where(
+                Watch.id == watch_id,
+                Watch.user_id == user_id,
+            )
+        )
+
     def list_all_active(self) -> list[Watch]:
         """List all active watches with sources loaded."""
 
         return list(
             self.session.scalars(
                 select(Watch)
-                .options(selectinload(Watch.watch_sources).selectinload(WatchSource.source))
+                .options(
+                    selectinload(Watch.watch_sources).selectinload(WatchSource.source)
+                )
                 .where(Watch.is_active.is_(True))
                 .order_by(Watch.id)
             )
@@ -143,6 +285,20 @@ class WatchRepository:
         if watch is None:
             return None
         watch.thread_id = thread_id
+        self.session.flush()
+        return watch
+
+    def set_starred_thread_id(
+        self,
+        watch_id: int,
+        thread_id: str | None,
+    ) -> Watch | None:
+        """Persist the Discord starred-thread id associated with a watch."""
+
+        watch = self.session.get(Watch, watch_id)
+        if watch is None:
+            return None
+        watch.starred_thread_id = thread_id
         self.session.flush()
         return watch
 
@@ -270,7 +426,9 @@ class ListingRepository:
         """Insert a listing if its source URL is new."""
 
         existing_listing = self.session.scalar(
-            select(Listing).where(Listing.source_id == source_id, Listing.url == listing.url)
+            select(Listing).where(
+                Listing.source_id == source_id, Listing.url == listing.url
+            )
         )
         if existing_listing is not None:
             self._update_listing(
@@ -303,7 +461,7 @@ class ListingRepository:
             score=score_result.score,
             score_reasons=score_result.reasons,
             content_hash=_content_hash(listing.title, listing.url),
-            raw_payload=listing.raw_payload or {},
+            raw_payload=_listing_raw_payload_for_insert(listing),
         )
         self.session.add(db_listing)
         self.session.flush()
@@ -317,7 +475,9 @@ class ListingRepository:
         """Find a previously stored listing for a candidate."""
 
         return self.session.scalar(
-            select(Listing).where(Listing.source_id == source_id, Listing.url == listing.url)
+            select(Listing).where(
+                Listing.source_id == source_id, Listing.url == listing.url
+            )
         )
 
     def update_listing(
@@ -353,8 +513,8 @@ class ListingRepository:
             )
         )
         if watch_listing is not None:
-            if watch_listing.status == "excluded":
-                watch_listing.status = "pending_digest"
+            if watch_listing.status == LISTING_STATUS_EXCLUDED:
+                watch_listing.status = LISTING_STATUS_PENDING_DIGEST
                 watch_listing.sent_at = None
                 watch_listing.watch_criteria_version = watch.criteria_version
                 self.session.flush()
@@ -378,9 +538,12 @@ class ListingRepository:
                 WatchListing.listing_id == listing.id,
             )
         )
-        if watch_listing is None or watch_listing.status != "pending_digest":
+        if (
+            watch_listing is None
+            or watch_listing.status != LISTING_STATUS_PENDING_DIGEST
+        ):
             return
-        watch_listing.status = "excluded"
+        watch_listing.status = LISTING_STATUS_EXCLUDED
         watch_listing.watch_criteria_version = watch.criteria_version
         self.session.flush()
 
@@ -393,7 +556,7 @@ class ListingRepository:
                 .join(WatchListing)
                 .where(
                     WatchListing.watch_id == watch_id,
-                    WatchListing.status == "pending_digest",
+                    WatchListing.status.in_(DELIVERABLE_LISTING_STATUSES),
                 )
                 .order_by(Listing.id)
             )
@@ -408,7 +571,7 @@ class ListingRepository:
                 .join(WatchListing)
                 .where(
                     WatchListing.watch_id == watch_id,
-                    WatchListing.status.in_(["pending_digest", "sent"]),
+                    WatchListing.status.in_(VISIBLE_LISTING_STATUSES),
                 )
                 .order_by(Listing.id)
             )
@@ -429,7 +592,7 @@ class ListingRepository:
                 .join(WatchListing)
                 .where(
                     WatchListing.watch_id == watch_id,
-                    WatchListing.status == "pending_digest",
+                    WatchListing.status.in_(DELIVERABLE_LISTING_STATUSES),
                     Listing.id.in_(listing_ids),
                 )
                 .order_by(Listing.id)
@@ -448,6 +611,9 @@ class ListingRepository:
     ) -> None:
         """Refresh fields that can change between scrape attempts."""
 
+        old_price_amount = db_listing.price_amount
+        old_price_currency = db_listing.price_currency
+
         db_listing.external_id = listing.external_id
         db_listing.title = listing.title
         db_listing.description = listing.description
@@ -463,7 +629,12 @@ class ListingRepository:
         db_listing.score = score_result.score
         db_listing.score_reasons = score_result.reasons
         db_listing.content_hash = _content_hash(listing.title, listing.url)
-        db_listing.raw_payload = listing.raw_payload or {}
+        db_listing.raw_payload = _listing_raw_payload_for_update(
+            db_listing,
+            listing,
+            old_price_amount,
+            old_price_currency,
+        )
         db_listing.last_seen_at = datetime.utcnow()
 
     def mark_listings_as_notified(self, watch_id: int, listing_ids: list[int]) -> None:
@@ -475,13 +646,83 @@ class ListingRepository:
             select(WatchListing).where(
                 WatchListing.watch_id == watch_id,
                 WatchListing.listing_id.in_(listing_ids),
-                WatchListing.status == "pending_digest",
+                WatchListing.status.in_(DELIVERABLE_LISTING_STATUSES),
             )
         )
         for watch_listing in watch_listings:
-            watch_listing.status = "sent"
+            watch_listing.status = LISTING_STATUS_SENT
             watch_listing.sent_at = datetime.utcnow()
         self.session.flush()
+
+    def update_watch_listing_status_for_user(
+        self,
+        user_id: int,
+        watch_id: int,
+        listing_id: int,
+        status: str,
+        starred_message_id: str | None = None,
+    ) -> WatchListing | None:
+        """Update a watch-listing status owned by a user."""
+
+        watch_listing = self.get_watch_listing_for_user(
+            user_id=user_id,
+            watch_id=watch_id,
+            listing_id=listing_id,
+        )
+        if watch_listing is None:
+            return None
+        watch_listing.status = status
+        if status == LISTING_STATUS_STARRED:
+            watch_listing.starred_message_id = starred_message_id
+        elif status != LISTING_STATUS_STARRED:
+            watch_listing.starred_message_id = None
+        if watch_listing.sent_at is None:
+            watch_listing.sent_at = datetime.utcnow()
+        self.session.flush()
+        return watch_listing
+
+    def unstar_watch_listing_for_user(
+        self,
+        user_id: int,
+        watch_id: int,
+        listing_id: int,
+    ) -> WatchListing | None:
+        """Remove starred state without reactivating inactive listings."""
+
+        watch_listing = self.get_watch_listing_for_user(
+            user_id=user_id,
+            watch_id=watch_id,
+            listing_id=listing_id,
+        )
+        if watch_listing is None:
+            return None
+        if watch_listing.status == LISTING_STATUS_STARRED:
+            watch_listing.status = LISTING_STATUS_SENT
+            if watch_listing.sent_at is None:
+                watch_listing.sent_at = datetime.utcnow()
+        watch_listing.starred_message_id = None
+        self.session.flush()
+        return watch_listing
+
+    def get_watch_listing_for_user(
+        self,
+        user_id: int,
+        watch_id: int,
+        listing_id: int,
+    ) -> WatchListing | None:
+        """Return a watch-listing row owned by a user."""
+
+        return self.session.scalar(
+            select(WatchListing)
+            .join(Watch)
+            .where(
+                Watch.id == watch_id,
+                Watch.user_id == user_id,
+                Watch.is_active.is_(True),
+                WatchListing.watch_id == watch_id,
+                WatchListing.listing_id == listing_id,
+            )
+        )
 
 
 class ScrapeAttemptRepository:

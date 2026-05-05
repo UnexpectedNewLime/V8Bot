@@ -7,6 +7,9 @@ from sqlalchemy import text
 from car_watch_bot.core.models import ListingCandidate, ScoreResult
 from car_watch_bot.db.database import create_database_engine, init_database
 from car_watch_bot.db.repositories import (
+    PREVIOUS_PRICE_AMOUNT_KEY,
+    PREVIOUS_PRICE_CURRENCY_KEY,
+    PRICE_CHANGED_AT_KEY,
     ListingRepository,
     SourceRepository,
     UserRepository,
@@ -14,7 +17,7 @@ from car_watch_bot.db.repositories import (
 )
 
 
-def test_init_database_adds_thread_id_to_existing_watch_table() -> None:
+def test_init_database_adds_thread_ids_to_existing_watch_table() -> None:
     engine = create_database_engine("sqlite:///:memory:")
     with engine.begin() as connection:
         connection.execute(
@@ -35,6 +38,34 @@ def test_init_database_adds_thread_id_to_existing_watch_table() -> None:
             for row in connection.execute(text("PRAGMA table_info(watches)")).fetchall()
         }
     assert "thread_id" in columns
+    assert "starred_thread_id" in columns
+
+
+def test_init_database_adds_starred_message_id_to_existing_watch_listing_table() -> (
+    None
+):
+    engine = create_database_engine("sqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE watch_listings ("
+                "id INTEGER PRIMARY KEY, "
+                "watch_id INTEGER NOT NULL, "
+                "listing_id INTEGER NOT NULL"
+                ")"
+            )
+        )
+
+    init_database(engine)
+
+    with engine.connect() as connection:
+        columns = {
+            row[1]
+            for row in connection.execute(
+                text("PRAGMA table_info(watch_listings)")
+            ).fetchall()
+        }
+    assert "starred_message_id" in columns
 
 
 def test_init_database_adds_structured_filters_to_existing_watch_table() -> None:
@@ -109,6 +140,23 @@ def test_watch_thread_id_can_be_persisted(db_session) -> None:
     assert watches.list_active_for_user(user.id)[0].thread_id == "555"
 
 
+def test_watch_starred_thread_id_can_be_persisted(db_session) -> None:
+    user = UserRepository(db_session).get_or_create_by_discord_id("123")
+    watches = WatchRepository(db_session)
+    watch = watches.create_watch(
+        user_id=user.id,
+        name="C5 watch",
+        query="C5 Corvette",
+        included_keywords=["manual"],
+    )
+
+    updated_watch = watches.set_starred_thread_id(watch.id, "777")
+
+    assert updated_watch is not None
+    assert updated_watch.starred_thread_id == "777"
+    assert watches.list_active_for_user(user.id)[0].starred_thread_id == "777"
+
+
 def test_source_creation_and_watch_assignment(db_session) -> None:
     user = UserRepository(db_session).get_or_create_by_discord_id("123")
     watch = WatchRepository(db_session).create_watch(
@@ -158,6 +206,50 @@ def test_listing_dedupe_by_source_url(db_session) -> None:
     assert first_created is True
     assert second_created is False
     assert first_listing.id == second_listing.id
+
+
+def test_listing_update_records_previous_price_snapshot(db_session) -> None:
+    source = SourceRepository(db_session).create_source(name="Mock Cars")
+    listings = ListingRepository(db_session)
+    score = ScoreResult(score=10, is_match=True, reasons=["keyword matched: manual"])
+
+    listing, created = listings.insert_listing_if_new(
+        source_id=source.id,
+        listing=ListingCandidate(
+            title="C5 Corvette manual",
+            url="https://example.test/c5",
+            price_amount=Decimal("10000.00"),
+            price_currency="USD",
+        ),
+        score_result=score,
+        converted_price_amount=Decimal("15000.00"),
+        converted_price_currency="AUD",
+        converted_mileage_value=None,
+        converted_mileage_unit="km",
+    )
+
+    updated_listing, updated_created = listings.insert_listing_if_new(
+        source_id=source.id,
+        listing=ListingCandidate(
+            title="C5 Corvette manual",
+            url="https://example.test/c5",
+            price_amount=Decimal("9500.00"),
+            price_currency="USD",
+        ),
+        score_result=score,
+        converted_price_amount=Decimal("14250.00"),
+        converted_price_currency="AUD",
+        converted_mileage_value=None,
+        converted_mileage_unit="km",
+    )
+
+    assert created is True
+    assert updated_created is False
+    assert updated_listing.id == listing.id
+    assert updated_listing.price_amount == Decimal("9500.00")
+    assert updated_listing.raw_payload[PREVIOUS_PRICE_AMOUNT_KEY] == "10000.00"
+    assert updated_listing.raw_payload[PREVIOUS_PRICE_CURRENCY_KEY] == "USD"
+    assert updated_listing.raw_payload[PRICE_CHANGED_AT_KEY].endswith("Z")
 
 
 def test_unnotified_listing_retrieval_and_mark_notified(db_session) -> None:
