@@ -33,6 +33,8 @@ Fields:
 - `guild_id`: Discord guild id, nullable.
 - `channel_id`: Discord channel id, nullable.
 - `thread_id`: resolved per-watch Discord thread id, nullable.
+- `starred_thread_id`: resolved per-watch starred shortlist Discord thread id,
+  nullable.
 - `name`: currently set from the car query.
 - `query`: car query used by scoring.
 - `included_keywords`: JSON list.
@@ -157,6 +159,9 @@ Current dedupe behavior:
 - `content_hash` is stored but not currently used as the primary upsert lookup.
 - Rediscovered rows are refreshed with latest listing fields, score, conversion,
   raw payload, and `last_seen_at`.
+- New and refreshed rows store V8Bot namespaced price snapshots in `raw_payload`
+  when a complete listing price is available. This supports honest price-change
+  display without adding dedicated price history tables.
 
 ## WatchListing
 
@@ -169,8 +174,12 @@ Fields:
 - `listing_id`.
 - `matched_at`.
 - `watch_criteria_version`.
-- `status`: currently `pending_digest`, `sent`, or `excluded`.
+- `status`: currently `pending_digest`, `sent`, `excluded`, `starred`, or
+  `inactive`. Older local rows may still contain legacy action states such as
+  `saved`, `contacted`, `dismissed`, or `not_relevant`.
 - `sent_at`.
+- `starred_message_id`: Discord message id for the copied shortlist listing,
+  nullable.
 
 Constraints:
 
@@ -181,6 +190,13 @@ Rules:
 - One listing can match many watches.
 - A watch-listing pair is only created once.
 - Sent listings are not re-posted by scheduled digests.
+- Starred listings remain visible in listing history, but are not pending
+  digest rows.
+- Unstarred listings move back to `sent` history so they remain visible without
+  returning to pending digest output.
+- Inactive listings are hidden from visible listing history and are not pending
+  digest rows.
+- Inactive listings are not reactivated by future scrapes for the same watch.
 - Listings rejected by updated exclusions can be marked `excluded`.
 - If an excluded listing later matches again, it can be moved back to
   `pending_digest`.
@@ -240,7 +256,9 @@ Rules:
 ## Not Implemented In The Current Schema
 
 - There is no `digest_batches` table.
-- Listing image URL, seller name, and listed-at fields are not persisted.
+- Listing image URL, seller name, and listed-at fields do not have dedicated
+  columns. Scrapers may preserve seller/image metadata in `raw_payload` for
+  digest presentation.
 - User email, website account linkage, and global preferences are not
   implemented.
 - Database migrations are not implemented.

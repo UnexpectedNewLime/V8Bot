@@ -1,6 +1,7 @@
 """Tests for digest formatting from persisted listings."""
 
 import asyncio
+from datetime import datetime
 from decimal import Decimal
 
 from car_watch_bot.core.models import ListingCandidate, ScoreResult
@@ -145,6 +146,102 @@ def test_digest_formats_prices_without_cents_and_with_commas(db_session) -> None
     assert digest is not None
     assert digest.listings[0].original_price == "USD 17,900"
     assert digest.listings[0].converted_price == "AUD 26,850"
+
+
+def test_digest_includes_richer_listing_metadata(db_session) -> None:
+    user = UserRepository(db_session).get_or_create_by_discord_id("123")
+    watch = WatchRepository(db_session).create_watch(
+        user_id=user.id,
+        name="C5 digest",
+        query="C5 Corvette",
+        included_keywords=["manual"],
+    )
+    source = SourceRepository(db_session).create_source(name="Mock Cars", kind="mock")
+    SourceRepository(db_session).add_source_to_watch(watch.id, source.id)
+    listing_repository = ListingRepository(db_session)
+    listing, _ = listing_repository.insert_listing_if_new(
+        source_id=source.id,
+        listing=ListingCandidate(
+            title="2001 Chevrolet Corvette",
+            url="https://example.test/c5",
+            price_amount=Decimal("17900.00"),
+            price_currency="USD",
+            location_text="Lake Havasu City, AZ",
+            raw_payload={
+                "dealer_name": "Desert Cars",
+                "thumbnail_url": "https://example.test/c5.jpg",
+            },
+        ),
+        score_result=ScoreResult(score=10, is_match=True, reasons=["keyword matched"]),
+        converted_price_amount=Decimal("26850.00"),
+        converted_price_currency="AUD",
+        converted_mileage_value=None,
+        converted_mileage_unit=None,
+    )
+    listing.first_seen_at = datetime(2026, 4, 27, 22, 10)
+    listing.last_seen_at = datetime(2026, 4, 29, 1, 20)
+    listing_repository.add_listing_to_watch(watch, listing)
+
+    digest = DigestService(listing_repository).build_digest(watch)
+
+    assert digest is not None
+    digest_listing = digest.listings[0]
+    assert digest_listing.location == "Lake Havasu City, AZ"
+    assert digest_listing.first_seen == "2026-04-28 08:10 AEST"
+    assert digest_listing.last_seen == "2026-04-29 11:20 AEST"
+    assert digest_listing.seller_info == "Dealer: Desert Cars"
+    assert digest_listing.image_url == "https://example.test/c5.jpg"
+    assert digest_listing.price_change is None
+
+
+def test_digest_includes_price_change_when_stored_history_exists(db_session) -> None:
+    user = UserRepository(db_session).get_or_create_by_discord_id("123")
+    watch = WatchRepository(db_session).create_watch(
+        user_id=user.id,
+        name="C5 digest",
+        query="C5 Corvette",
+        included_keywords=["manual"],
+    )
+    source = SourceRepository(db_session).create_source(name="Mock Cars", kind="mock")
+    SourceRepository(db_session).add_source_to_watch(watch.id, source.id)
+    listing_repository = ListingRepository(db_session)
+    listing, _ = listing_repository.insert_listing_if_new(
+        source_id=source.id,
+        listing=ListingCandidate(
+            title="2001 Chevrolet Corvette",
+            url="https://example.test/c5",
+            price_amount=Decimal("20000.00"),
+            price_currency="USD",
+        ),
+        score_result=ScoreResult(score=10, is_match=True, reasons=["keyword matched"]),
+        converted_price_amount=Decimal("30000.00"),
+        converted_price_currency="AUD",
+        converted_mileage_value=None,
+        converted_mileage_unit=None,
+    )
+    listing_repository.add_listing_to_watch(watch, listing)
+    listing_repository.insert_listing_if_new(
+        source_id=source.id,
+        listing=ListingCandidate(
+            title="2001 Chevrolet Corvette",
+            url="https://example.test/c5",
+            price_amount=Decimal("19000.00"),
+            price_currency="USD",
+        ),
+        score_result=ScoreResult(score=10, is_match=True, reasons=["keyword matched"]),
+        converted_price_amount=Decimal("28500.00"),
+        converted_price_currency="AUD",
+        converted_mileage_value=None,
+        converted_mileage_unit=None,
+    )
+
+    digest = DigestService(listing_repository).build_digest(watch)
+
+    assert digest is not None
+    assert (
+        digest.listings[0].price_change
+        == "Down USD 1,000 from USD 20,000 to USD 19,000"
+    )
 
 
 def test_digest_infers_common_source_name_from_url_for_older_rows(db_session) -> None:
