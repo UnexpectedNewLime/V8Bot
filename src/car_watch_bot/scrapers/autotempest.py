@@ -457,6 +457,10 @@ def _queue_item_to_listing(
             "backend_sitecode": item.get("backendSitecode"),
             "sitecode": item.get("sitecode"),
             "vin": item.get("vin"),
+            "dealer_name": _first_text(item, ["dealerName", "dealer_name", "dealer"]),
+            "seller_name": _first_text(item, ["sellerName", "seller_name", "seller"]),
+            "seller_type": _first_text(item, ["sellerType", "seller_type"]),
+            "thumbnail_url": _queue_image_url(item),
             "raw_text": description,
             "warnings": _field_warnings(price_amount, mileage_value),
             "errors": [],
@@ -488,6 +492,67 @@ def _queue_description(item: dict[str, Any]) -> str:
     ]
     fields.extend(_queue_detail_texts(item))
     return _clean_text(" ".join(str(field) for field in fields if field))
+
+
+def _first_text(item: dict[str, Any], keys: list[str]) -> str | None:
+    """Return the first non-empty string value from a queue item."""
+
+    for key in keys:
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return _clean_text(value)
+    return None
+
+
+def _queue_image_url(item: dict[str, Any]) -> str | None:
+    """Return a usable image URL from common queue-results shapes."""
+
+    for key in (
+        "thumbnailUrl",
+        "thumbnail_url",
+        "imageUrl",
+        "image_url",
+        "primaryPhotoUrl",
+        "primary_photo_url",
+        "photoUrl",
+        "photo_url",
+    ):
+        image_url = _http_url_from_value(item.get(key))
+        if image_url is not None:
+            return image_url
+    for key in ("images", "imageUrls", "image_urls", "photos", "photoUrls", "photo_urls"):
+        collection = item.get(key)
+        if not isinstance(collection, list):
+            continue
+        for value in collection:
+            image_url = _http_url_from_value(value)
+            if image_url is not None:
+                return image_url
+    return None
+
+
+def _http_url_from_value(value: object) -> str | None:
+    """Extract an HTTP URL from a string or image object."""
+
+    if isinstance(value, dict):
+        for key in (
+            "url",
+            "href",
+            "thumbnailUrl",
+            "thumbnail_url",
+            "imageUrl",
+            "image_url",
+        ):
+            image_url = _http_url_from_value(value.get(key))
+            if image_url is not None:
+                return image_url
+        return None
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text.startswith(("http://", "https://")):
+        return None
+    return text
 
 
 def _queue_detail_texts(item: dict[str, Any]) -> list[str]:
