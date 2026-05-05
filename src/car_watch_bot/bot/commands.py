@@ -21,6 +21,7 @@ from car_watch_bot.services.source_service import (
     SourceValidationError,
 )
 from car_watch_bot.services.watch_service import (
+    WatchDigestControls,
     WatchNotFoundError,
     WatchService,
     WatchSummary,
@@ -422,6 +423,49 @@ def register_commands(
             "failed to update distance unit",
         )
 
+    @command_tree.command(name="watch_digest_show", description="Show digest controls.")
+    async def watch_digest_show(interaction: discord.Interaction, watch_id: int) -> None:
+        async def action() -> str:
+            controls = watch_service.get_digest_controls(
+                str(interaction.user.id),
+                watch_id,
+            )
+            return _format_digest_controls(controls)
+
+        await _send_ephemeral_result(interaction, action, "failed to show digest controls")
+
+    @command_tree.command(name="watch_digest_edit", description="Update digest controls.")
+    async def watch_digest_edit(
+        interaction: discord.Interaction,
+        watch_id: int,
+        no_update_messages: bool | None = None,
+        max_listings: int | None = None,
+        clear_max_listings: bool = False,
+        summary_only: bool | None = None,
+        immediate_alerts: bool | None = None,
+        quiet_hours_start: str = "",
+        quiet_hours_end: str = "",
+        clear_quiet_hours: bool = False,
+        digest_frequency_minutes: int | None = None,
+    ) -> None:
+        async def action() -> str:
+            controls = watch_service.update_digest_controls(
+                discord_user_id=str(interaction.user.id),
+                watch_id=watch_id,
+                no_update_messages=no_update_messages,
+                max_listings=max_listings,
+                clear_max_listings=clear_max_listings,
+                summary_only=summary_only,
+                immediate_alerts=immediate_alerts,
+                quiet_hours_start=quiet_hours_start,
+                quiet_hours_end=quiet_hours_end,
+                clear_quiet_hours=clear_quiet_hours,
+                digest_frequency_minutes=digest_frequency_minutes,
+            )
+            return _format_digest_controls(controls, heading="digest controls updated")
+
+        await _send_ephemeral_result(interaction, action, "failed to update digest controls")
+
 
 async def _send_ephemeral_result(
     interaction: discord.Interaction,
@@ -689,6 +733,42 @@ def _format_watch_block(summary: WatchSummary) -> str:
             f"Sources: `{summary.active_sources_count}`",
         ]
     )
+
+
+def _format_digest_controls(
+    controls: WatchDigestControls,
+    heading: str = "**Digest controls**",
+) -> str:
+    """Format digest controls for an ephemeral command response."""
+
+    return "\n".join(
+        [
+            heading,
+            f"`#{controls.watch_id}` **{controls.car_query}**",
+            f"No-update messages: {_yes_no(controls.no_update_messages)}",
+            f"Max listings: {_format_max_listings(controls.max_listings)}",
+            f"Summary only: {_yes_no(controls.summary_only)}",
+            f"Immediate alerts: {_yes_no(controls.immediate_alerts)}",
+            f"Quiet hours: {_format_quiet_hours(controls)}",
+            f"Frequency: every `{controls.digest_frequency_minutes}` minutes",
+        ]
+    )
+
+
+def _format_max_listings(max_listings: int | None) -> str:
+    """Format a digest listing cap."""
+
+    if max_listings is None:
+        return "no limit"
+    return f"`{max_listings}`"
+
+
+def _format_quiet_hours(controls: WatchDigestControls) -> str:
+    """Format quiet hours."""
+
+    if controls.quiet_hours_start is None or controls.quiet_hours_end is None:
+        return "off"
+    return f"`{controls.quiet_hours_start}` to `{controls.quiet_hours_end}`"
 
 
 def _format_scrape_now_result(result: ScrapeNowResult) -> str:

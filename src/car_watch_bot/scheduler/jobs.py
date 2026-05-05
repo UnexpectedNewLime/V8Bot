@@ -63,7 +63,7 @@ def create_scheduler(
     scheduler.add_job(
         digest_job,
         "interval",
-        minutes=1,
+        minutes=settings.digest_poll_interval_minutes,
         id="send_due_digests",
         replace_existing=True,
     )

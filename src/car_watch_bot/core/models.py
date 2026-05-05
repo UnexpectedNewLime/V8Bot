@@ -84,6 +84,7 @@ class DigestPayload:
     watch_query: str
     listing_count: int
     listings: list[DigestListing]
+    summary_only: bool = False
 
 
 @dataclass(frozen=True)

@@ -37,6 +37,37 @@ def test_init_database_adds_thread_id_to_existing_watch_table() -> None:
     assert "thread_id" in columns
 
 
+def test_init_database_adds_digest_controls_to_existing_watch_table() -> None:
+    engine = create_database_engine("sqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE watches ("
+                "id INTEGER PRIMARY KEY, "
+                "user_id INTEGER NOT NULL, "
+                "name VARCHAR(120) NOT NULL"
+                ")"
+            )
+        )
+
+    init_database(engine)
+
+    with engine.connect() as connection:
+        columns = {
+            row[1]
+            for row in connection.execute(text("PRAGMA table_info(watches)")).fetchall()
+        }
+    assert {
+        "digest_no_update_enabled",
+        "digest_max_listings",
+        "digest_summary_only",
+        "digest_immediate_alerts",
+        "digest_quiet_hours_start",
+        "digest_quiet_hours_end",
+        "digest_frequency_minutes",
+    }.issubset(columns)
+
+
 def test_user_creation_is_idempotent(db_session) -> None:
     users = UserRepository(db_session)
 
@@ -58,6 +89,13 @@ def test_watch_creation_and_active_listing(db_session) -> None:
     )
 
     assert watch in watches.list_active_for_user(user.id)
+    assert watch.digest_no_update_enabled is True
+    assert watch.digest_max_listings is None
+    assert watch.digest_summary_only is False
+    assert watch.digest_immediate_alerts is False
+    assert watch.digest_quiet_hours_start is None
+    assert watch.digest_quiet_hours_end is None
+    assert watch.digest_frequency_minutes == 1440
 
 
 def test_watch_thread_id_can_be_persisted(db_session) -> None:
@@ -157,3 +195,37 @@ def test_unnotified_listing_retrieval_and_mark_notified(db_session) -> None:
     listings.mark_listings_as_notified(watch.id, [listing.id])
 
     assert listings.list_unnotified_for_watch(watch.id) == []
+
+
+def test_unnotified_listing_retrieval_can_be_limited(db_session) -> None:
+    user = UserRepository(db_session).get_or_create_by_discord_id("123")
+    watch = WatchRepository(db_session).create_watch(
+        user_id=user.id,
+        name="C5 watch",
+        query="C5 Corvette",
+        included_keywords=["manual"],
+    )
+    source = SourceRepository(db_session).create_source(name="Mock Cars")
+    score = ScoreResult(score=10, is_match=True, reasons=["keyword matched: manual"])
+    listings = ListingRepository(db_session)
+    for index in range(3):
+        listing, _ = listings.insert_listing_if_new(
+            source_id=source.id,
+            listing=ListingCandidate(
+                title=f"C5 Corvette manual {index}",
+                url=f"https://example.test/c5/{index}",
+            ),
+            score_result=score,
+            converted_price_amount=None,
+            converted_price_currency="AUD",
+            converted_mileage_value=None,
+            converted_mileage_unit="km",
+        )
+        listings.add_listing_to_watch(watch, listing)
+
+    limited = listings.list_unnotified_for_watch(watch.id, limit=2)
+
+    assert [listing.title for listing in limited] == [
+        "C5 Corvette manual 0",
+        "C5 Corvette manual 1",
+    ]

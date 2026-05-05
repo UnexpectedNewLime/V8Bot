@@ -51,6 +51,29 @@ def test_digest_with_multiple_listings(db_session) -> None:
     assert any("keyword matched: manual" in listing.score_reasons for listing in digest.listings)
 
 
+def test_digest_can_limit_listings(db_session) -> None:
+    watch = _seed_digest_data(db_session)
+    digest = DigestService(ListingRepository(db_session)).build_digest(
+        watch,
+        max_listings=2,
+    )
+
+    assert digest is not None
+    assert digest.listing_count == 2
+    assert len(digest.listings) == 2
+
+
+def test_digest_can_mark_payload_summary_only(db_session) -> None:
+    watch = _seed_digest_data(db_session)
+    digest = DigestService(ListingRepository(db_session)).build_digest(
+        watch,
+        summary_only=True,
+    )
+
+    assert digest is not None
+    assert digest.summary_only is True
+
+
 def test_no_empty_digest(db_session) -> None:
     user = UserRepository(db_session).get_or_create_by_discord_id("123")
     watch = WatchRepository(db_session).create_watch(

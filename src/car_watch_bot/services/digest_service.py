@@ -21,11 +21,19 @@ class DigestService:
     def __init__(self, listing_repository: ListingRepository) -> None:
         self.listing_repository = listing_repository
 
-    def build_digest(self, watch: Watch) -> DigestPayload | None:
+    def build_digest(
+        self,
+        watch: Watch,
+        max_listings: int | None = None,
+        summary_only: bool = False,
+    ) -> DigestPayload | None:
         """Build a digest payload from persisted pending listings."""
 
-        listings = self.listing_repository.list_unnotified_for_watch(watch.id)
-        return self._build_digest_from_listings(watch, listings)
+        listings = self.listing_repository.list_unnotified_for_watch(
+            watch.id,
+            limit=max_listings,
+        )
+        return self._build_digest_from_listings(watch, listings, summary_only=summary_only)
 
     def build_digest_for_listing_ids(
         self,
@@ -50,6 +58,7 @@ class DigestService:
         self,
         watch: Watch,
         listings: list[Listing],
+        summary_only: bool = False,
     ) -> DigestPayload | None:
         """Build a digest payload from listing rows."""
 
@@ -61,6 +70,7 @@ class DigestService:
             watch_query=watch.query,
             listing_count=len(digest_listings),
             listings=digest_listings,
+            summary_only=summary_only,
         )
 
     def mark_digest_sent(self, watch_id: int, listing_ids: list[int]) -> None:

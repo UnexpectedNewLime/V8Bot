@@ -41,6 +41,15 @@ Fields:
 - `distance_unit`: `km` or `mi`, default `km`.
 - `notification_time`: local time of day.
 - `timezone`: default `Australia/Sydney`.
+- `digest_no_update_enabled`: whether empty due checks post a no-update message.
+- `digest_max_listings`: optional cap for listings consumed in one scheduled
+  digest.
+- `digest_summary_only`: whether scheduled digests send one summary message
+  instead of listing embeds.
+- `digest_immediate_alerts`: stored preference for immediate alerts.
+- `digest_quiet_hours_start`: optional local quiet-hours start.
+- `digest_quiet_hours_end`: optional local quiet-hours end.
+- `digest_frequency_minutes`: per-watch digest slot frequency, default `1440`.
 - `criteria_version`: starts at `1`.
 - `is_active`.
 - `deactivated_at`.
@@ -56,6 +65,8 @@ Rules:
 - Watch operations are scoped to the Discord owner.
 - Digest delivery requires `channel_id`; thread id is resolved and persisted
   after the first send.
+- Digest controls affect scheduled delivery only. Manual listing commands keep
+  their explicit command behavior.
 
 ## Source
 
@@ -244,3 +255,5 @@ Rules:
 - User email, website account linkage, and global preferences are not
   implemented.
 - Database migrations are not implemented.
+- Immediate-alert runtime delivery is not implemented; only the per-watch
+  preference is stored.

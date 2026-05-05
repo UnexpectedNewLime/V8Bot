@@ -4,6 +4,7 @@ import pytest
 
 from car_watch_bot.bot.commands import (
     SourceBatchAddResult,
+    _format_digest_controls,
     _format_sources_added,
     _parse_source_urls,
     _split_discord_message,
@@ -15,6 +16,7 @@ from car_watch_bot.services.source_service import (
     SourceSummary,
     SourceValidationError,
 )
+from car_watch_bot.services.watch_service import WatchDigestControls
 
 
 def test_split_discord_message_keeps_chunks_under_limit() -> None:
@@ -142,3 +144,27 @@ def test_sources_added_summary_hides_low_signal_facebook_warning() -> None:
     assert "autotempest" in message
     assert "Facebook" not in message
     assert "Notes:" not in message
+
+
+def test_digest_controls_summary_formats_optional_values() -> None:
+    controls = WatchDigestControls(
+        watch_id=7,
+        car_query="C5 Corvette",
+        no_update_messages=False,
+        max_listings=3,
+        summary_only=True,
+        immediate_alerts=True,
+        quiet_hours_start="22:00",
+        quiet_hours_end="07:00",
+        digest_frequency_minutes=720,
+    )
+
+    message = _format_digest_controls(controls)
+
+    assert "`#7` **C5 Corvette**" in message
+    assert "No-update messages: no" in message
+    assert "Max listings: `3`" in message
+    assert "Summary only: yes" in message
+    assert "Immediate alerts: yes" in message
+    assert "Quiet hours: `22:00` to `07:00`" in message
+    assert "Frequency: every `720` minutes" in message

@@ -9,6 +9,10 @@ from car_watch_bot.core.models import WatchDeliveryTarget
 from car_watch_bot.db.models import Watch
 from car_watch_bot.db.repositories import SourceRepository, UserRepository, WatchRepository
 
+MIN_DIGEST_FREQUENCY_MINUTES = 1
+MAX_DIGEST_FREQUENCY_MINUTES = 10080
+MAX_DIGEST_LISTINGS_LIMIT = 50
+
 
 class WatchServiceError(Exception):
     """Base exception for watch service failures."""
@@ -34,6 +38,21 @@ class WatchSummary:
     preferred_currency: str
     distance_unit: str
     active_sources_count: int
+
+
+@dataclass(frozen=True)
+class WatchDigestControls:
+    """Per-watch digest controls safe for interface presentation."""
+
+    watch_id: int
+    car_query: str
+    no_update_messages: bool
+    max_listings: int | None
+    summary_only: bool
+    immediate_alerts: bool
+    quiet_hours_start: str | None
+    quiet_hours_end: str | None
+    digest_frequency_minutes: int
 
 
 class WatchService:
@@ -248,6 +267,68 @@ class WatchService:
             session.commit()
             return summary
 
+    def get_digest_controls(
+        self,
+        discord_user_id: str,
+        watch_id: int,
+    ) -> WatchDigestControls:
+        """Return per-watch digest controls for an owned active watch."""
+
+        with self.session_factory() as session:
+            watch = self._get_owned_watch(session, discord_user_id, watch_id)
+            controls = self._watch_digest_controls(watch)
+            session.commit()
+            return controls
+
+    def update_digest_controls(
+        self,
+        discord_user_id: str,
+        watch_id: int,
+        no_update_messages: bool | None = None,
+        max_listings: int | None = None,
+        clear_max_listings: bool = False,
+        summary_only: bool | None = None,
+        immediate_alerts: bool | None = None,
+        quiet_hours_start: str | None = None,
+        quiet_hours_end: str | None = None,
+        clear_quiet_hours: bool = False,
+        digest_frequency_minutes: int | None = None,
+    ) -> WatchDigestControls:
+        """Update per-watch digest controls for an owned active watch."""
+
+        if clear_max_listings and max_listings is not None:
+            raise WatchValidationError("choose max_listings or clear_max_listings, not both")
+        if max_listings is not None:
+            _validate_max_digest_listings(max_listings)
+        if digest_frequency_minutes is not None:
+            _validate_digest_frequency(digest_frequency_minutes)
+        parsed_quiet_hours = _parse_quiet_hours_update(
+            quiet_hours_start=quiet_hours_start,
+            quiet_hours_end=quiet_hours_end,
+            clear_quiet_hours=clear_quiet_hours,
+        )
+
+        with self.session_factory() as session:
+            watch = self._get_owned_watch(session, discord_user_id, watch_id)
+            if no_update_messages is not None:
+                watch.digest_no_update_enabled = no_update_messages
+            if clear_max_listings:
+                watch.digest_max_listings = None
+            elif max_listings is not None:
+                watch.digest_max_listings = max_listings
+            if summary_only is not None:
+                watch.digest_summary_only = summary_only
+            if immediate_alerts is not None:
+                watch.digest_immediate_alerts = immediate_alerts
+            if parsed_quiet_hours is not None:
+                watch.digest_quiet_hours_start = parsed_quiet_hours[0]
+                watch.digest_quiet_hours_end = parsed_quiet_hours[1]
+            if digest_frequency_minutes is not None:
+                watch.digest_frequency_minutes = digest_frequency_minutes
+            controls = self._watch_digest_controls(watch)
+            session.commit()
+            return controls
+
     def add_source_to_watch(
         self,
         discord_user_id: str,
@@ -338,6 +419,21 @@ class WatchService:
             active_sources_count=active_sources_count,
         )
 
+    def _watch_digest_controls(self, watch: Watch) -> WatchDigestControls:
+        """Create interface-safe digest controls."""
+
+        return WatchDigestControls(
+            watch_id=watch.id,
+            car_query=watch.query,
+            no_update_messages=watch.digest_no_update_enabled,
+            max_listings=watch.digest_max_listings,
+            summary_only=watch.digest_summary_only,
+            immediate_alerts=watch.digest_immediate_alerts,
+            quiet_hours_start=_format_optional_time(watch.digest_quiet_hours_start),
+            quiet_hours_end=_format_optional_time(watch.digest_quiet_hours_end),
+            digest_frequency_minutes=watch.digest_frequency_minutes,
+        )
+
     def _active_sources_count(self, watch: Watch) -> int:
         """Count active enabled sources on a loaded watch."""
 
@@ -384,3 +480,61 @@ def parse_notify_time(raw_notify_time: str) -> time:
         return time(hour=hour, minute=minute)
     except ValueError as exc:
         raise WatchValidationError("notify_time must use HH:MM format") from exc
+
+
+def _validate_max_digest_listings(max_listings: int) -> None:
+    """Validate a digest listing cap."""
+
+    if max_listings < 1 or max_listings > MAX_DIGEST_LISTINGS_LIMIT:
+        raise WatchValidationError(
+            f"max_listings must be between 1 and {MAX_DIGEST_LISTINGS_LIMIT}"
+        )
+
+
+def _validate_digest_frequency(digest_frequency_minutes: int) -> None:
+    """Validate digest frequency minutes."""
+
+    if (
+        digest_frequency_minutes < MIN_DIGEST_FREQUENCY_MINUTES
+        or digest_frequency_minutes > MAX_DIGEST_FREQUENCY_MINUTES
+    ):
+        raise WatchValidationError(
+            "digest_frequency_minutes must be between "
+            f"{MIN_DIGEST_FREQUENCY_MINUTES} and {MAX_DIGEST_FREQUENCY_MINUTES}"
+        )
+
+
+def _parse_quiet_hours_update(
+    quiet_hours_start: str | None,
+    quiet_hours_end: str | None,
+    clear_quiet_hours: bool,
+) -> tuple[time | None, time | None] | None:
+    """Parse a quiet-hours command update."""
+
+    start_text = (quiet_hours_start or "").strip()
+    end_text = (quiet_hours_end or "").strip()
+    if clear_quiet_hours:
+        if start_text or end_text:
+            raise WatchValidationError(
+                "choose quiet_hours_start/end or clear_quiet_hours, not both"
+            )
+        return (None, None)
+    if not start_text and not end_text:
+        return None
+    if not start_text or not end_text:
+        raise WatchValidationError(
+            "quiet_hours_start and quiet_hours_end must be supplied together"
+        )
+    start = parse_notify_time(start_text)
+    end = parse_notify_time(end_text)
+    if start == end:
+        raise WatchValidationError("quiet hours start and end must be different")
+    return (start, end)
+
+
+def _format_optional_time(value: time | None) -> str | None:
+    """Format an optional time for command output."""
+
+    if value is None:
+        return None
+    return value.strftime("%H:%M")

@@ -4,9 +4,9 @@
 
 V8Bot is a purpose-built Discord bot for watching car listings. Users create a
 watch with a car query, included keywords, excluded keywords, preferred currency,
-distance unit, source URLs, and a notification time. The bot stores matching
-listings, deduplicates them per source and watch, and posts listing embeds to a
-watch-specific Discord thread.
+distance unit, source URLs, a notification time, and digest controls. The bot
+stores matching listings, deduplicates them per source and watch, and posts
+listing embeds or digest summaries to a watch-specific Discord thread.
 
 ## Target Users
 
@@ -32,6 +32,8 @@ watch-specific Discord thread.
 - User-triggered immediate scraping through `/watch_scrape_now` and the
   `scrape_now` option on `/watch_add`.
 - Scheduled digests at each watch's notification time.
+- Per-watch digest controls for no-update messages, listing caps,
+  summary-only output, immediate-alert preference, quiet hours, and frequency.
 - Per-watch public Discord threads for listing embeds and digest messages.
 - Static USD to AUD conversion through `USD_TO_AUD_RATE`.
 - Mileage display in the watch's preferred distance unit, defaulting to
@@ -61,6 +63,7 @@ A watch currently stores:
 - Preferred currency.
 - Distance unit.
 - Notification time and timezone.
+- Digest controls.
 - Criteria version and active state.
 
 Material keyword or source changes increment `criteria_version`. Watch commands
@@ -89,9 +92,15 @@ Facebook URLs are rejected.
 
 Scheduled scrape jobs collect listings from registered adapters and store
 matching rows silently. Scheduled digest jobs later read stored pending listings
-and post them to the watch thread when the watch's local notification time is
-due. Empty due digests post a no-update confirmation and update the watch's last
-digest timestamp.
+and post them to the watch thread when the watch's local digest slot is due.
+Empty due digests post a no-update confirmation when enabled and update the
+watch's last digest timestamp after a message is sent.
+
+Watch-level digest controls can suppress no-update messages, cap the number of
+listings consumed in one digest, send a single summary message instead of embeds,
+skip quiet-hours windows, and throttle digest slots by frequency. Immediate
+alerts are stored as a preference, but scheduled collection remains silent until
+a sender-aware immediate-alert flow is added.
 
 Manual user-triggered scraping is intentionally more immediate:
 
@@ -113,5 +122,6 @@ Manual user-triggered scraping is intentionally more immediate:
   production scraping.
 - Scrape runs deduplicate listings and avoid duplicate pending deliveries.
 - Scheduled digests only send due watches once per local notification minute.
+- Scheduled digests respect watch-level digest controls.
 - Per-watch Discord threads are created, reused, and persisted.
 - Tests pass without Discord credentials or live network calls.

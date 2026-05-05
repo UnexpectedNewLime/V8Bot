@@ -3,9 +3,9 @@
 Purpose-built Discord bot for scheduled car listing watch digests.
 
 V8Bot lets Discord users create car watches with keywords, excluded keywords,
-preferred currency, distance unit, listing sources, and a notification time.
-The bot scrapes sources, dedupes listings, stores matches, and posts digest
-messages to Discord.
+preferred currency, distance unit, listing sources, a notification time, and
+per-watch digest controls. The bot scrapes sources, dedupes listings, stores
+matches, and posts digest messages to Discord.
 
 Current source status:
 
@@ -125,6 +125,8 @@ The current Discord interface registers:
 - `/watch_notify_time`
 - `/watch_currency`
 - `/watch_distance_unit`
+- `/watch_digest_show`
+- `/watch_digest_edit`
 
 ## Recommended Discord Test Flow
 
@@ -163,6 +165,29 @@ You can also run the flow manually:
 
 `/watch_source_add` accepts one or more URLs in its `url` field. The optional
 `name` field can only be used with a single URL.
+
+## Digest Controls
+
+Use `/watch_digest_show watch_id:<id>` to inspect the current scheduled digest
+policy for a watch.
+
+Use `/watch_digest_edit` to update these per-watch controls:
+
+- `no_update_messages`: send or suppress scheduled "no new listings" messages.
+- `max_listings`: cap how many pending listings one scheduled digest consumes.
+- `clear_max_listings`: remove the listing cap.
+- `summary_only`: send one summary text message instead of one embed per
+  listing.
+- `immediate_alerts`: store the preference for immediate listing alerts.
+- `quiet_hours_start` and `quiet_hours_end`: skip digest sends inside a local
+  quiet-hours window. The window may cross midnight.
+- `clear_quiet_hours`: remove quiet hours.
+- `digest_frequency_minutes`: schedule digest slots from the watch's
+  `notify_time`. The default is `1440`, meaning once daily.
+
+Immediate alerts are persisted and shown in commands, but scheduled collection
+still stores listings silently in this branch. Wiring immediate posting into the
+collection job needs a sender-aware scheduler flow.
 
 ## Local Scrape Flow Without Discord
 
@@ -217,10 +242,12 @@ By default, the command returns exact vehicle listing URLs only.
 When the bot is running, APScheduler starts:
 
 - scraping every `SCRAPE_INTERVAL_MINUTES`
-- digest checks every minute
+- digest checks every `DIGEST_POLL_INTERVAL_MINUTES`
 
 Digest checks send only stored, unnotified listings for watches whose local
-`notify_time` matches the current minute.
+digest slot is due. Per-watch digest controls can suppress no-update messages,
+cap listings, send summary-only output, skip quiet hours, and throttle by
+frequency.
 
 ## Run Tests
 

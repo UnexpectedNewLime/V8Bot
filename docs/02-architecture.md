@@ -138,7 +138,8 @@ Current services:
   watch-source pairs.
 - `DigestService`: builds digest/listing payloads from stored rows and marks
   rows sent.
-- `NotificationService`: sends due scheduled digests or no-update confirmations.
+- `NotificationService`: sends due scheduled digests or no-update confirmations
+  after applying watch-level digest controls.
 
 ## Scraper Layer
 
@@ -154,8 +155,8 @@ use saved fixtures or mocked `httpx` transports.
 ## Persistence Layer
 
 `init_database` creates tables with SQLAlchemy metadata. There is no migration
-framework. The only compatibility shim currently adds `watches.thread_id` to
-older local SQLite databases if missing.
+framework. Compatibility shims add `watches.thread_id` and watch-level
+digest-control columns to older local SQLite databases if missing.
 
 Repositories are grouped in one module:
 
@@ -171,10 +172,11 @@ Repositories are grouped in one module:
 APScheduler registers two jobs:
 
 - `collect_listings`, every `SCRAPE_INTERVAL_MINUTES`.
-- `send_due_digests`, every minute.
+- `send_due_digests`, every `DIGEST_POLL_INTERVAL_MINUTES`.
 
-The digest poll interval setting exists in config, but the current scheduler job
-uses a fixed one-minute interval.
+Digest frequency is per-watch notification policy enforced by
+`NotificationService`; the scheduler only controls how often due watches are
+polled.
 
 ## Configuration
 

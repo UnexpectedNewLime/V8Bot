@@ -31,6 +31,8 @@ The current command tree contains:
 - `/watch_notify_time`.
 - `/watch_currency`.
 - `/watch_distance_unit`.
+- `/watch_digest_show`.
+- `/watch_digest_edit`.
 
 ## `/watch_add`
 
@@ -204,6 +206,43 @@ Behavior:
 - Distance unit must be `km` or `mi`.
 - Returns an ephemeral watch summary.
 
+## Digest Control Commands
+
+### `/watch_digest_show`
+
+Options:
+
+- `watch_id`: required integer.
+
+Behavior:
+
+- Shows the owned watch's scheduled digest controls.
+- Response is ephemeral.
+
+### `/watch_digest_edit`
+
+Options:
+
+- `watch_id`: required integer.
+- `no_update_messages`: optional boolean.
+- `max_listings`: optional integer, 1 through 50.
+- `clear_max_listings`: optional boolean.
+- `summary_only`: optional boolean.
+- `immediate_alerts`: optional boolean.
+- `quiet_hours_start`: optional `HH:MM`.
+- `quiet_hours_end`: optional `HH:MM`.
+- `clear_quiet_hours`: optional boolean.
+- `digest_frequency_minutes`: optional integer, 1 through 10080.
+
+Behavior:
+
+- Updates only the supplied controls.
+- Requires quiet-hours start and end to be supplied together unless clearing.
+- Rejects setting and clearing the same control in one call.
+- Stores the immediate-alert preference, but current scheduled collection still
+  stores matches silently.
+- Returns an ephemeral digest-control summary.
+
 ## Digest Message Shape
 
 Each listing is rendered as its own Discord embed. The embed contains:
@@ -218,6 +257,8 @@ Each listing is rendered as its own Discord embed. The embed contains:
 - Score reasons.
 
 Scheduled no-update digests send a short text message to the watch thread.
+When summary-only is enabled for a watch, a scheduled digest sends one text
+summary and marks the included listing ids sent.
 
 ## Discord Limits
 

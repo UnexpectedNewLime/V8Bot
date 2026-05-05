@@ -382,20 +382,25 @@ class ListingRepository:
         watch_listing.watch_criteria_version = watch.criteria_version
         self.session.flush()
 
-    def list_unnotified_for_watch(self, watch_id: int) -> list[Listing]:
+    def list_unnotified_for_watch(
+        self,
+        watch_id: int,
+        limit: int | None = None,
+    ) -> list[Listing]:
         """List pending listings for a watch."""
 
-        return list(
-            self.session.scalars(
-                select(Listing)
-                .join(WatchListing)
-                .where(
-                    WatchListing.watch_id == watch_id,
-                    WatchListing.status == "pending_digest",
-                )
-                .order_by(Listing.id)
+        statement = (
+            select(Listing)
+            .join(WatchListing)
+            .where(
+                WatchListing.watch_id == watch_id,
+                WatchListing.status == "pending_digest",
             )
+            .order_by(Listing.id)
         )
+        if limit is not None:
+            statement = statement.limit(limit)
+        return list(self.session.scalars(statement))
 
     def list_visible_for_watch(self, watch_id: int) -> list[Listing]:
         """List watch listings that are not excluded by current criteria."""

@@ -122,6 +122,13 @@ class DiscordDigestSender:
     ) -> str | None:
         """Send one digest payload to a watch thread."""
 
+        if digest.summary_only:
+            return await send_to_watch_thread(
+                self.client,
+                target,
+                content=_format_digest_summary(target, digest),
+            )
+
         thread = await resolve_watch_thread(self.client, target)
         for embed in _build_digest_embeds(digest):
             await thread.send(embed=embed, silent=True)
@@ -148,6 +155,18 @@ def _build_digest_embeds(digest: DigestPayload) -> list[discord.Embed]:
         )
         for listing in digest.listings
     ]
+
+
+def _format_digest_summary(
+    target: WatchDeliveryTarget,
+    digest: DigestPayload,
+) -> str:
+    """Format a summary-only scheduled digest message."""
+
+    return (
+        f"{target.watch_name}: {digest.listing_count} new listings. "
+        f"Use `/watch_listings watch_id:{target.watch_id}` to review them."
+    )
 
 
 def _format_listing_embed_value(listing: DigestListing) -> str:
