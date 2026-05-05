@@ -110,6 +110,7 @@ The current Discord interface registers:
 
 - `/ping`
 - `/watch_add`
+- `/watch_add_autotempest`
 - `/watch_list`
 - `/watch_remove`
 - `/watch_keyword_add`
@@ -128,7 +129,30 @@ The current Discord interface registers:
 
 ## Recommended Discord Test Flow
 
-Use the one-command setup path:
+Use the guided AutoTempest setup path when you do not want to paste a source
+URL:
+
+```text
+/watch_add_autotempest
+make: Chevrolet
+model: Corvette
+notify_time: 22:08
+year_min: 2001
+year_max: 2001
+transmission: manual
+zip_postcode: 90210
+radius: 500
+keywords: manual, targa, hud
+exclude_keywords: automatic, convertible
+scrape_now: True
+```
+
+This builds a deterministic AutoTempest results URL, creates the watch, attaches
+and tests the generated `autotempest` source, and optionally runs the normal
+scrape-now posting flow. If `keywords` is omitted, the command uses the model
+and selected transmission as default match keywords.
+
+Use the raw URL one-command setup path when you already have source URLs:
 
 ```text
 /watch_add
@@ -144,6 +168,13 @@ scrape_now: True
 `source_url` may contain multiple URLs separated by spaces, commas, or new
 lines. Pasted Markdown links are also accepted. Generated names are made unique
 per user, such as `cars-on-line` and `cars-on-line 2`.
+
+The AutoTempest search builder assumes the URL shape used by the repository's
+existing examples: `https://www.autotempest.com/results` with `localization=any`
+and query parameters such as `make`, `model`, `minyear`, `maxyear`,
+`transmission`, `zip`, and `radius`. Transmission maps to AutoTempest's observed
+`man` and `auto` values. Radius is passed through as miles and requires
+`zip_postcode`.
 
 Expected result:
 

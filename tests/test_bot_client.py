@@ -23,6 +23,7 @@ def test_create_bot_client_registers_expected_commands(db_session_factory) -> No
     assert command_names == {
         "ping",
         "watch_add",
+        "watch_add_autotempest",
         "watch_currency",
         "watch_distance_unit",
         "watch_exclude_add",
@@ -39,3 +40,21 @@ def test_create_bot_client_registers_expected_commands(db_session_factory) -> No
         "watch_source_remove",
         "watch_source_test",
     }
+
+    command_by_name = {
+        command.name: command for command in client.command_tree.get_commands()
+    }
+    autotempest_command = command_by_name["watch_add_autotempest"]
+    assert [parameter.name for parameter in autotempest_command.parameters] == [
+        "make",
+        "model",
+        "notify_time",
+        "year_min",
+        "year_max",
+        "transmission",
+        "zip_postcode",
+        "radius",
+        "keywords",
+        "exclude_keywords",
+        "scrape_now",
+    ]

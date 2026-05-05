@@ -12,7 +12,12 @@ from discord import app_commands
 from car_watch_bot.bot.embeds import build_listing_embed
 from car_watch_bot.bot.watch_threads import resolve_watch_thread
 from car_watch_bot.core.models import DigestListing, ScrapeNowResult, SourceTestResult
+from car_watch_bot.core.source_presets import SourcePresetValidationError
 from car_watch_bot.services.listing_service import ListingService
+from car_watch_bot.services.source_preset_service import (
+    AutoTempestWatchSetupResult,
+    SourcePresetService,
+)
 from car_watch_bot.services.source_service import (
     SourceAddResult,
     SourceNotFoundError,
@@ -50,6 +55,12 @@ def register_commands(
     listing_service: ListingService,
 ) -> None:
     """Register supported slash commands."""
+
+    source_preset_service = SourcePresetService(
+        watch_service=watch_service,
+        source_service=source_service,
+        listing_service=listing_service,
+    )
 
     @command_tree.command(name="ping", description="Check whether the bot is responsive.")
     async def ping(interaction: discord.Interaction) -> None:
@@ -138,6 +149,98 @@ def register_commands(
             )
 
         await _send_ephemeral_result(interaction, action, "failed to create watch")
+
+    @command_tree.command(
+        name="watch_add_autotempest",
+        description="Add a watch from AutoTempest search fields.",
+    )
+    @app_commands.describe(
+        make="Vehicle make, such as Chevrolet.",
+        model="Vehicle model, such as Corvette.",
+        notify_time="Daily digest time in HH:MM.",
+        year_min="Minimum model year.",
+        year_max="Maximum model year.",
+        transmission="Optional transmission filter.",
+        zip_postcode="ZIP/postcode for a localized AutoTempest search.",
+        radius="Search radius in miles; requires zip_postcode.",
+        keywords="Comma-separated match keywords. Defaults to model/transmission.",
+        exclude_keywords="Comma-separated terms to exclude.",
+        scrape_now="Scrape immediately and post new listing embeds.",
+    )
+    @app_commands.choices(
+        transmission=[
+            app_commands.Choice(name="Any", value="any"),
+            app_commands.Choice(name="Manual", value="manual"),
+            app_commands.Choice(name="Automatic", value="automatic"),
+        ]
+    )
+    async def watch_add_autotempest(
+        interaction: discord.Interaction,
+        make: str,
+        model: str,
+        notify_time: str,
+        year_min: int | None = None,
+        year_max: int | None = None,
+        transmission: str = "any",
+        zip_postcode: str = "",
+        radius: int | None = None,
+        keywords: str = "",
+        exclude_keywords: str = "",
+        scrape_now: bool = True,
+    ) -> None:
+        async def action() -> str:
+            result = await source_preset_service.add_autotempest_watch(
+                discord_user_id=str(interaction.user.id),
+                make=make,
+                model=model,
+                notify_time=notify_time,
+                year_min=year_min,
+                year_max=year_max,
+                transmission=transmission,
+                zip_postcode=zip_postcode,
+                radius=radius,
+                keywords=keywords,
+                exclude_keywords=exclude_keywords,
+                guild_id=str(interaction.guild_id) if interaction.guild_id else None,
+                channel_id=str(interaction.channel_id) if interaction.channel_id else None,
+                scrape_now=scrape_now,
+            )
+            if result.scrape_result is not None:
+                await _send_public_listing_embeds(
+                    interaction,
+                    watch_service,
+                    str(interaction.user.id),
+                    result.watch.watch_id,
+                    result.listings,
+                    heading=(
+                        f"{result.watch.car_query}: "
+                        f"{len(result.listings)} new listings"
+                    ),
+                    empty_message=(
+                        f"{result.watch.car_query}: scrape complete, no new listings."
+                    ),
+                )
+                listing_service.mark_watch_listings_sent(
+                    str(interaction.user.id),
+                    result.watch.watch_id,
+                    result.scrape_result.new_listing_ids,
+                )
+            logger.info(
+                "watch_add_autotempest completed watch_id=%s user_id=%s "
+                "source_id=%s scraped=%s domain=%s",
+                result.watch.watch_id,
+                interaction.user.id,
+                result.source_result.source.source_id,
+                result.scrape_result is not None,
+                _source_domain(result.source_url),
+            )
+            return _format_autotempest_watch_setup(result)
+
+        await _send_ephemeral_result(
+            interaction,
+            action,
+            "failed to create AutoTempest watch",
+        )
 
     @command_tree.command(name="watch_list", description="List your active watches.")
     async def watch_list(interaction: discord.Interaction) -> None:
@@ -441,7 +544,11 @@ async def _send_ephemeral_result(
     await interaction.response.defer(ephemeral=True)
     try:
         message = await action()
-    except (WatchValidationError, SourceValidationError) as exc:
+    except (
+        WatchValidationError,
+        SourceValidationError,
+        SourcePresetValidationError,
+    ) as exc:
         logger.info(
             "discord command validation failed command=%s user_id=%s error=%s",
             command_name,
@@ -660,6 +767,19 @@ def _format_watch_created_with_sources(
     ]
     if scrape_result is not None:
         sections.append(_format_scrape_now_result(scrape_result))
+    return "\n\n".join(sections)
+
+
+def _format_autotempest_watch_setup(result: AutoTempestWatchSetupResult) -> str:
+    """Format AutoTempest preset setup results."""
+
+    sections = [
+        _format_watch_created(result.watch),
+        "**Search preset**\nAutoTempest search URL generated and source-tested.",
+        _format_source_added(result.source_result),
+    ]
+    if result.scrape_result is not None:
+        sections.append(_format_scrape_now_result(result.scrape_result))
     return "\n\n".join(sections)
 
 

@@ -16,6 +16,7 @@ The current command tree contains:
 
 - `/ping`.
 - `/watch_add`.
+- `/watch_add_autotempest`.
 - `/watch_list`.
 - `/watch_remove`.
 - `/watch_keyword_add`.
@@ -55,6 +56,36 @@ Behavior:
 - If `scrape_now` is true and at least one source was added, scrapes the watch,
   posts only newly pending listings to the watch thread, and marks those posted
   listings sent.
+- Returns an ephemeral setup summary.
+
+## `/watch_add_autotempest`
+
+Options:
+
+- `make`: required string.
+- `model`: required string.
+- `notify_time`: required `HH:MM`.
+- `year_min`: optional integer.
+- `year_max`: optional integer.
+- `transmission`: optional choice: `any`, `manual`, or `automatic`.
+- `zip_postcode`: optional localized search ZIP/postcode.
+- `radius`: optional integer radius in miles, requires `zip_postcode`.
+- `keywords`: optional comma-separated match keywords.
+- `exclude_keywords`: optional comma-separated terms to exclude.
+- `scrape_now`: optional boolean, default true.
+
+Behavior:
+
+- Builds a deterministic AutoTempest URL from structured command fields.
+- Uses `https://www.autotempest.com/results` with `localization=any`.
+- Maps manual/automatic transmission to AutoTempest's observed `man`/`auto`
+  query tokens.
+- Creates a watch with a generated query such as `2001 Chevrolet Corvette`.
+- Defaults keywords to the model and selected transmission when the user leaves
+  `keywords` blank.
+- Adds and tests the generated source through `SourceService`.
+- If `scrape_now` is true, uses the same scrape/post/mark-sent behavior as
+  `/watch_add`.
 - Returns an ephemeral setup summary.
 
 ## `/watch_list`
