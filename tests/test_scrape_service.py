@@ -6,7 +6,8 @@ from decimal import Decimal
 from sqlalchemy import func, select
 
 from car_watch_bot.core.models import ListingCandidate
-from car_watch_bot.db.models import Listing, ScrapeAttempt, WatchListing
+from car_watch_bot.core.structured_filters import WatchFilters
+from car_watch_bot.db.models import Listing, ScrapeAttempt, Watch, WatchListing
 from car_watch_bot.db.repositories import (
     ListingRepository,
     ScrapeAttemptRepository,
@@ -29,7 +30,10 @@ class MutableScraper:
         return self.candidates
 
 
-def _create_c5_watch_with_mock_source(db_session) -> tuple[int, int]:
+def _create_c5_watch_with_mock_source(
+    db_session,
+    structured_filters: dict[str, object] | None = None,
+) -> tuple[int, int]:
     user = UserRepository(db_session).get_or_create_by_discord_id("123")
     watch = WatchRepository(db_session).create_watch(
         user_id=user.id,
@@ -37,6 +41,7 @@ def _create_c5_watch_with_mock_source(db_session) -> tuple[int, int]:
         query="C5 Corvette",
         included_keywords=["manual", "HUD", "targa"],
         excluded_keywords=["automatic", "convertible"],
+        structured_filters=structured_filters,
     )
     source = SourceRepository(db_session).create_source(name="Mock Cars", kind="mock")
     SourceRepository(db_session).add_source_to_watch(watch.id, source.id)
@@ -115,6 +120,54 @@ def test_excluded_keyword_listing_is_not_persisted(db_session) -> None:
     assert "2001 Corvette C5 automatic convertible" not in titles
 
 
+def test_structured_filters_reject_out_of_range_scrape_candidates(db_session) -> None:
+    watch_id, _ = _create_c5_watch_with_mock_source(
+        db_session,
+            structured_filters=WatchFilters.from_inputs(
+                price_max=30000,
+                body_style="coupe",
+            ).to_dict(),
+    )
+    service = _create_scrape_service(db_session)
+
+    created_count = asyncio.run(service.run_once())
+
+    pending_listings = ListingRepository(db_session).list_unnotified_for_watch(watch_id)
+    assert created_count == 1
+    assert [listing.title for listing in pending_listings] == [
+        "1999 Chevrolet Corvette C5 manual coupe"
+    ]
+
+
+def test_structured_filters_exclude_existing_pending_listing(db_session) -> None:
+    watch_id, _ = _create_c5_watch_with_mock_source(db_session)
+    service = _create_scrape_service(db_session)
+    asyncio.run(service.run_once())
+
+    watch = db_session.get(Watch, watch_id)
+    assert watch is not None
+    watch.structured_filters = WatchFilters.from_inputs(price_max=10000).to_dict()
+    watch.criteria_version += 1
+    asyncio.run(service.run_once())
+
+    assert ListingRepository(db_session).list_unnotified_for_watch(watch_id) == []
+    listing = db_session.scalar(
+        select(Listing).where(
+            Listing.url == "https://example.test/listings/c5-manual-hud-targa"
+        )
+    )
+    assert listing is not None
+    assert "structured filter: price above maximum" in listing.score_reasons
+    watch_listing = db_session.scalar(
+        select(WatchListing).where(
+            WatchListing.watch_id == watch_id,
+            WatchListing.listing_id == listing.id,
+        )
+    )
+    assert watch_listing is not None
+    assert watch_listing.status == "excluded"
+
+
 def test_repeated_scrape_refreshes_existing_listing_description_and_score(
     db_session,
 ) -> None:
@@ -184,7 +237,9 @@ def test_excluded_keyword_removes_existing_pending_listing(db_session) -> None:
     asyncio.run(service.run_once())
 
     assert ListingRepository(db_session).list_unnotified_for_watch(watch_id) == []
-    listing = db_session.scalar(select(Listing).where(Listing.url == "https://example.test/c5"))
+    listing = db_session.scalar(
+        select(Listing).where(Listing.url == "https://example.test/c5")
+    )
     assert listing is not None
     assert listing.description == "manual coupe automatic"
     assert "excluded keyword: automatic" in listing.score_reasons

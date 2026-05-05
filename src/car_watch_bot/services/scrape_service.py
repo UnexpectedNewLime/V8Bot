@@ -4,8 +4,9 @@ from decimal import Decimal
 from logging import getLogger
 
 from car_watch_bot.core.conversions import convert_usd_to_aud, miles_to_kilometres
-from car_watch_bot.core.models import ListingCandidate
+from car_watch_bot.core.models import ListingCandidate, ScoreResult
 from car_watch_bot.core.scoring import score_listing
+from car_watch_bot.core.structured_filters import WatchFilters
 from car_watch_bot.db.models import Source, Watch
 from car_watch_bot.db.repositories import (
     ListingRepository,
@@ -71,7 +72,10 @@ class ScrapeService:
         try:
             candidates = await adapter.fetch_listings(request)
         except Exception as exc:
-            logger.warning("scrape failed", extra={"watch_id": watch.id, "source_id": source.id})
+            logger.warning(
+                "scrape failed",
+                extra={"watch_id": watch.id, "source_id": source.id},
+            )
             self.scrape_attempt_repository.create_attempt(
                 watch_id=watch.id,
                 source_id=source.id,
@@ -81,29 +85,36 @@ class ScrapeService:
             )
             return 0
 
+        structured_filters = WatchFilters.from_dict(watch.structured_filters)
         matched_count = 0
         created_count = 0
         for candidate in candidates:
+            converted_price = self._converted_price(candidate, watch.preferred_currency)
+            converted_mileage = self._converted_mileage(candidate, watch.distance_unit)
             score_result = score_listing(
                 candidate,
                 car_query=watch.query,
                 keywords=watch.included_keywords,
                 excluded_keywords=watch.excluded_keywords,
             )
+            filter_result = structured_filters.evaluate_listing(
+                candidate,
+                converted_price_amount=converted_price,
+                converted_mileage_value=converted_mileage,
+                distance_unit=watch.distance_unit,
+            )
+            if score_result.is_match and not filter_result.is_match:
+                score_result = ScoreResult(
+                    score=-50,
+                    is_match=False,
+                    reasons=[*score_result.reasons, *filter_result.reasons],
+                )
             if not score_result.is_match:
                 existing_listing = self.listing_repository.find_existing_listing(
                     source_id=source.id,
                     listing=candidate,
                 )
                 if existing_listing is not None:
-                    converted_price = self._converted_price(
-                        candidate,
-                        watch.preferred_currency,
-                    )
-                    converted_mileage = self._converted_mileage(
-                        candidate,
-                        watch.distance_unit,
-                    )
                     self.listing_repository.update_listing(
                         existing_listing,
                         candidate,
@@ -120,8 +131,6 @@ class ScrapeService:
                 continue
 
             matched_count += 1
-            converted_price = self._converted_price(candidate, watch.preferred_currency)
-            converted_mileage = self._converted_mileage(candidate, watch.distance_unit)
             listing, was_created = self.listing_repository.insert_listing_if_new(
                 source_id=source.id,
                 listing=candidate,

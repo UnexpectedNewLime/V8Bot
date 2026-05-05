@@ -28,7 +28,9 @@ def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
 
     parser = argparse.ArgumentParser(
-        description="Create or reuse a watch, add/test a source, scrape, and print listings.",
+        description=(
+            "Create or reuse a watch, add/test a source, scrape, and print listings."
+        ),
     )
     parser.add_argument("--discord-user-id", default="local-cli")
     parser.add_argument("--watch-id", type=int)
@@ -36,6 +38,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--keywords", default="manual")
     parser.add_argument("--exclude-keywords", default="")
     parser.add_argument("--notify-time", default="09:00")
+    parser.add_argument("--price-min")
+    parser.add_argument("--price-max")
+    parser.add_argument("--year-min", type=int)
+    parser.add_argument("--year-max", type=int)
+    parser.add_argument("--mileage-max", type=int)
+    parser.add_argument("--transmission")
+    parser.add_argument("--location")
+    parser.add_argument("--radius", type=int)
+    parser.add_argument("--body-style")
+    parser.add_argument("--must-have")
+    parser.add_argument("--clear-filter-fields", default="")
     parser.add_argument("--source-name", default="AutoTempest Local")
     parser.add_argument("--source-url", required=True)
     parser.add_argument("--limit", type=int, default=10)
@@ -76,6 +89,18 @@ async def main() -> None:
 
     watch_id = args.watch_id
     payload: dict[str, Any] = {"discord_user_id": args.discord_user_id}
+    filter_args = {
+        "price_min": args.price_min,
+        "price_max": args.price_max,
+        "year_min": args.year_min,
+        "year_max": args.year_max,
+        "mileage_max": args.mileage_max,
+        "transmission": args.transmission,
+        "location": args.location,
+        "radius": args.radius,
+        "body_style": args.body_style,
+        "must_have": args.must_have,
+    }
     if watch_id is None:
         watch = watch_service.create_watch(
             discord_user_id=args.discord_user_id,
@@ -83,11 +108,22 @@ async def main() -> None:
             keywords=args.keywords,
             exclude_keywords=args.exclude_keywords,
             notify_time=args.notify_time,
+            **filter_args,
         )
         watch_id = watch.watch_id
         payload["watch"] = watch.__dict__
     else:
         payload["watch_id"] = watch_id
+        if args.clear_filter_fields or any(
+            value is not None for value in filter_args.values()
+        ):
+            watch = watch_service.update_filters(
+                args.discord_user_id,
+                watch_id,
+                clear_fields=args.clear_filter_fields,
+                **filter_args,
+            )
+            payload["watch_filters"] = watch.filters.to_dict()
 
     source_result = await source_service.add_source_to_watch(
         discord_user_id=args.discord_user_id,

@@ -27,6 +27,7 @@ def test_create_bot_client_registers_expected_commands(db_session_factory) -> No
         "watch_distance_unit",
         "watch_exclude_add",
         "watch_exclude_remove",
+        "watch_filters",
         "watch_keyword_add",
         "watch_keyword_remove",
         "watch_list",

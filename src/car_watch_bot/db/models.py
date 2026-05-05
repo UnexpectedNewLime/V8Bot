@@ -55,6 +55,11 @@ class Watch(Base):
     query: Mapped[str] = mapped_column(String(240))
     included_keywords: Mapped[list[str]] = mapped_column(JSON, default=list)
     excluded_keywords: Mapped[list[str]] = mapped_column(JSON, default=list)
+    structured_filters: Mapped[dict[str, Any]] = mapped_column(
+        JSON,
+        default=dict,
+        nullable=False,
+    )
     preferred_currency: Mapped[str] = mapped_column(String(3), default="AUD")
     distance_unit: Mapped[str] = mapped_column(String(2), default="km")
     notification_time: Mapped[time] = mapped_column(Time)

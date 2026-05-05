@@ -22,6 +22,7 @@ The current command tree contains:
 - `/watch_keyword_remove`.
 - `/watch_exclude_add`.
 - `/watch_exclude_remove`.
+- `/watch_filters`.
 - `/watch_source_add`.
 - `/watch_source_list`.
 - `/watch_source_remove`.
@@ -43,6 +44,14 @@ Options:
 - `source_url`: optional field containing one or more URLs.
 - `source_name`: optional name, only allowed with a single URL.
 - `scrape_now`: optional boolean, default true.
+- `price_min`, `price_max`: optional integers in the watch currency.
+- `year_min`, `year_max`: optional model-year integers.
+- `mileage_max`: optional integer in the watch distance unit.
+- `transmission`: optional string.
+- `location`: optional string.
+- `radius`: optional integer, requires `location`.
+- `body_style`: optional string.
+- `must_have`: optional comma-separated required terms.
 
 Behavior:
 
@@ -55,6 +64,7 @@ Behavior:
 - If `scrape_now` is true and at least one source was added, scrapes the watch,
   posts only newly pending listings to the watch thread, and marks those posted
   listings sent.
+- Saves any structured filters and applies them during the initial scrape.
 - Returns an ephemeral setup summary.
 
 ## `/watch_list`
@@ -68,6 +78,7 @@ Lists the user's active watches with:
 - Notification time.
 - Preferred currency and distance unit.
 - Active source count.
+- Structured filter summary.
 
 ## `/watch_remove`
 
@@ -95,6 +106,32 @@ Behavior:
 - Rejects blank keywords and keywords containing commas.
 - Prevents removing the last included keyword.
 - Increments criteria version when the stored keyword list changes.
+- Returns an ephemeral watch summary.
+
+## Structured Filter Command
+
+`/watch_filters` updates structured filters on an owned active watch.
+
+Options:
+
+- `watch_id`: required integer.
+- `price_min`, `price_max`: optional integers in the watch currency.
+- `year_min`, `year_max`: optional model-year integers.
+- `mileage_max`: optional integer in the watch distance unit.
+- `transmission`: optional string.
+- `location`: optional string.
+- `radius`: optional integer, requires `location`.
+- `body_style`: optional string.
+- `must_have`: optional comma-separated required terms.
+- `clear_fields`: optional comma-separated names to clear, group names such as
+  `price`, `year`, `location_radius`, `body`, or `must_have`, or `all`.
+
+Behavior:
+
+- Omitted fields keep their existing values.
+- `clear_fields` can remove saved filter values.
+- Rejects invalid ranges, unknown clear fields, and radius without location.
+- Increments criteria version when stored filters change.
 - Returns an ephemeral watch summary.
 
 ## Source Commands
@@ -168,6 +205,8 @@ Behavior:
 - Scrapes each active enabled source attached to the owned watch when a matching
   adapter exists.
 - Skips sources with no adapter and reports warnings.
+- Applies structured filters after scoring and conversion but before a listing
+  becomes a pending watch match.
 - Posts newly pending listings as embeds in the watch thread.
 - Marks the posted listing ids sent.
 - Returns an ephemeral scrape summary.

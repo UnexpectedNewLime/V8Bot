@@ -37,6 +37,8 @@ Fields:
 - `query`: car query used by scoring.
 - `included_keywords`: JSON list.
 - `excluded_keywords`: JSON list.
+- `structured_filters`: JSON object with optional price, year, mileage,
+  transmission, location/radius, body style, and must-have term filters.
 - `preferred_currency`: default `AUD`.
 - `distance_unit`: `km` or `mi`, default `km`.
 - `notification_time`: local time of day.
@@ -53,9 +55,24 @@ Rules:
 - Watch creation requires a non-empty car query and at least one included
   keyword.
 - Keyword and source association changes increment `criteria_version`.
+- Structured filter changes increment `criteria_version`.
 - Watch operations are scoped to the Discord owner.
 - Digest delivery requires `channel_id`; thread id is resolved and persisted
   after the first send.
+- `init_database` adds `structured_filters` to older SQLite databases because
+  there is no migration framework.
+
+Structured filter keys:
+
+- `price_min` and `price_max`: decimal strings in the current watch currency.
+- `year_min` and `year_max`: model-year integers.
+- `mileage_max`: integer in the current watch distance unit.
+- `transmission`: text matched against listing text or raw payload metadata.
+- `location`: text matched against listing location fields.
+- `radius`: integer in the current watch distance unit. It requires `location`
+  and is enforced when source distance metadata is available.
+- `body_style`: text matched against listing text or raw payload metadata.
+- `must_have_terms`: JSON list of required text terms.
 
 ## Source
 

@@ -65,6 +65,16 @@ def register_commands(
         source_url: str = "",
         source_name: str = "",
         scrape_now: bool = True,
+        price_min: int | None = None,
+        price_max: int | None = None,
+        year_min: int | None = None,
+        year_max: int | None = None,
+        mileage_max: int | None = None,
+        transmission: str | None = None,
+        location: str | None = None,
+        radius: int | None = None,
+        body_style: str | None = None,
+        must_have: str | None = None,
     ) -> None:
         async def action() -> str:
             summary = watch_service.create_watch(
@@ -75,6 +85,16 @@ def register_commands(
                 notify_time=notify_time,
                 guild_id=str(interaction.guild_id) if interaction.guild_id else None,
                 channel_id=str(interaction.channel_id) if interaction.channel_id else None,
+                price_min=price_min,
+                price_max=price_max,
+                year_min=year_min,
+                year_max=year_max,
+                mileage_max=mileage_max,
+                transmission=transmission,
+                location=location,
+                radius=radius,
+                body_style=body_style,
+                must_have=must_have,
             )
             source_urls = _parse_source_urls(source_url)
             _validate_source_name_usage(source_name, source_urls)
@@ -285,6 +305,42 @@ def register_commands(
             action,
             "failed to remove exclude keyword",
         )
+
+    @command_tree.command(name="watch_filters", description="Update structured filters.")
+    async def watch_filters(
+        interaction: discord.Interaction,
+        watch_id: int,
+        price_min: int | None = None,
+        price_max: int | None = None,
+        year_min: int | None = None,
+        year_max: int | None = None,
+        mileage_max: int | None = None,
+        transmission: str | None = None,
+        location: str | None = None,
+        radius: int | None = None,
+        body_style: str | None = None,
+        must_have: str | None = None,
+        clear_fields: str = "",
+    ) -> None:
+        async def action() -> str:
+            summary = watch_service.update_filters(
+                str(interaction.user.id),
+                watch_id,
+                price_min=price_min,
+                price_max=price_max,
+                year_min=year_min,
+                year_max=year_max,
+                mileage_max=mileage_max,
+                transmission=transmission,
+                location=location,
+                radius=radius,
+                body_style=body_style,
+                must_have=must_have,
+                clear_fields=clear_fields,
+            )
+            return _format_watch_updated("filters updated", summary)
+
+        await _send_ephemeral_result(interaction, action, "failed to update filters")
 
     @command_tree.command(name="watch_source_add", description="Add and test a source.")
     async def watch_source_add(
@@ -641,6 +697,7 @@ def _format_watch_created(summary: WatchSummary) -> str:
             "**Watch created**",
             f"`#{summary.watch_id}` {summary.car_query}",
             f"Keywords: {_comma_list(summary.keywords)}",
+            f"Filters: {_format_filters(summary)}",
             f"Notify: `{summary.notify_time}`",
             f"Defaults: `{summary.preferred_currency}` / `{summary.distance_unit}`",
         ]
@@ -684,6 +741,7 @@ def _format_watch_block(summary: WatchSummary) -> str:
             f"`#{summary.watch_id}` **{summary.car_query}**",
             f"Keywords: {_comma_list(summary.keywords)}",
             f"Excluded: {exclude_text}",
+            f"Filters: {_format_filters(summary)}",
             f"Notify: `{summary.notify_time}`",
             f"Defaults: `{summary.preferred_currency}` / `{summary.distance_unit}`",
             f"Sources: `{summary.active_sources_count}`",
@@ -742,6 +800,15 @@ def _comma_list(values: list[str]) -> str:
     """Format a readable comma-separated list."""
 
     return ", ".join(values) if values else "none"
+
+
+def _format_filters(summary: WatchSummary) -> str:
+    """Format structured watch filters."""
+
+    return summary.filters.describe(
+        preferred_currency=summary.preferred_currency,
+        distance_unit=summary.distance_unit,
+    )
 
 
 def _yes_no(value: bool) -> str:

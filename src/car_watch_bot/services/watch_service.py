@@ -6,8 +6,17 @@ from datetime import time
 from sqlalchemy.orm import Session, sessionmaker
 
 from car_watch_bot.core.models import WatchDeliveryTarget
+from car_watch_bot.core.structured_filters import (
+    StructuredFilterValidationError,
+    WatchFilters,
+    parse_clear_fields,
+)
 from car_watch_bot.db.models import Watch
-from car_watch_bot.db.repositories import SourceRepository, UserRepository, WatchRepository
+from car_watch_bot.db.repositories import (
+    SourceRepository,
+    UserRepository,
+    WatchRepository,
+)
 
 
 class WatchServiceError(Exception):
@@ -33,6 +42,7 @@ class WatchSummary:
     notify_time: str
     preferred_currency: str
     distance_unit: str
+    filters: WatchFilters
     active_sources_count: int
 
 
@@ -60,6 +70,16 @@ class WatchService:
         notify_time: str,
         guild_id: str | None = None,
         channel_id: str | None = None,
+        price_min: int | str | None = None,
+        price_max: int | str | None = None,
+        year_min: int | str | None = None,
+        year_max: int | str | None = None,
+        mileage_max: int | str | None = None,
+        transmission: str | None = None,
+        location: str | None = None,
+        radius: int | str | None = None,
+        body_style: str | None = None,
+        must_have: str | None = None,
     ) -> WatchSummary:
         """Create a watch for a Discord user."""
 
@@ -69,6 +89,18 @@ class WatchService:
             allow_empty=True,
         )
         parsed_notify_time = parse_notify_time(notify_time)
+        structured_filters = _parse_structured_filters(
+            price_min=price_min,
+            price_max=price_max,
+            year_min=year_min,
+            year_max=year_max,
+            mileage_max=mileage_max,
+            transmission=transmission,
+            location=location,
+            radius=radius,
+            body_style=body_style,
+            must_have=must_have,
+        )
         normalized_query = car_query.strip()
         if not normalized_query:
             raise WatchValidationError("car_query is required")
@@ -81,6 +113,7 @@ class WatchService:
                 query=normalized_query,
                 included_keywords=parsed_keywords,
                 excluded_keywords=parsed_exclude_keywords,
+                structured_filters=structured_filters.to_dict(),
                 notification_time=parsed_notify_time,
                 guild_id=guild_id,
                 channel_id=channel_id,
@@ -89,6 +122,52 @@ class WatchService:
                 timezone=self.default_timezone,
             )
             summary = self._watch_summary(watch, active_sources_count=0)
+            session.commit()
+            return summary
+
+    def update_filters(
+        self,
+        discord_user_id: str,
+        watch_id: int,
+        price_min: int | str | None = None,
+        price_max: int | str | None = None,
+        year_min: int | str | None = None,
+        year_max: int | str | None = None,
+        mileage_max: int | str | None = None,
+        transmission: str | None = None,
+        location: str | None = None,
+        radius: int | str | None = None,
+        body_style: str | None = None,
+        must_have: str | None = None,
+        clear_fields: str | None = None,
+    ) -> WatchSummary:
+        """Update structured filters for a user's watch."""
+
+        parsed_clear_fields = _parse_filter_clear_fields(clear_fields)
+        with self.session_factory() as session:
+            watch = self._get_owned_watch(session, discord_user_id, watch_id)
+            current_filters = _watch_filters(watch)
+            try:
+                updated_filters = current_filters.with_updates(
+                    clear_fields=parsed_clear_fields,
+                    price_min=price_min,
+                    price_max=price_max,
+                    year_min=year_min,
+                    year_max=year_max,
+                    mileage_max=mileage_max,
+                    transmission=transmission,
+                    location=location,
+                    radius=radius,
+                    body_style=body_style,
+                    must_have=must_have,
+                )
+            except StructuredFilterValidationError as exc:
+                raise WatchValidationError(str(exc)) from exc
+
+            if updated_filters.to_dict() != current_filters.to_dict():
+                watch.structured_filters = updated_filters.to_dict()
+                watch.criteria_version += 1
+            summary = self._watch_summary(watch, self._active_sources_count(watch))
             session.commit()
             return summary
 
@@ -117,7 +196,12 @@ class WatchService:
             watch_repository.deactivate_watch(watch.id)
             session.commit()
 
-    def add_keyword(self, discord_user_id: str, watch_id: int, keyword: str) -> WatchSummary:
+    def add_keyword(
+        self,
+        discord_user_id: str,
+        watch_id: int,
+        keyword: str,
+    ) -> WatchSummary:
         """Add an included keyword to a user's watch."""
 
         normalized_keyword = _normalize_single_keyword(keyword)
@@ -335,6 +419,7 @@ class WatchService:
             notify_time=watch.notification_time.strftime("%H:%M"),
             preferred_currency=watch.preferred_currency,
             distance_unit=watch.distance_unit,
+            filters=_watch_filters(watch),
             active_sources_count=active_sources_count,
         )
 
@@ -384,3 +469,53 @@ def parse_notify_time(raw_notify_time: str) -> time:
         return time(hour=hour, minute=minute)
     except ValueError as exc:
         raise WatchValidationError("notify_time must use HH:MM format") from exc
+
+
+def _parse_structured_filters(
+    *,
+    price_min: int | str | None = None,
+    price_max: int | str | None = None,
+    year_min: int | str | None = None,
+    year_max: int | str | None = None,
+    mileage_max: int | str | None = None,
+    transmission: str | None = None,
+    location: str | None = None,
+    radius: int | str | None = None,
+    body_style: str | None = None,
+    must_have: str | None = None,
+) -> WatchFilters:
+    """Parse command-friendly structured filter inputs."""
+
+    try:
+        return WatchFilters.from_inputs(
+            price_min=price_min,
+            price_max=price_max,
+            year_min=year_min,
+            year_max=year_max,
+            mileage_max=mileage_max,
+            transmission=transmission,
+            location=location,
+            radius=radius,
+            body_style=body_style,
+            must_have=must_have,
+        )
+    except StructuredFilterValidationError as exc:
+        raise WatchValidationError(str(exc)) from exc
+
+
+def _parse_filter_clear_fields(clear_fields: str | None) -> set[str]:
+    """Parse structured filter clear field names for service callers."""
+
+    try:
+        return parse_clear_fields(clear_fields)
+    except StructuredFilterValidationError as exc:
+        raise WatchValidationError(str(exc)) from exc
+
+
+def _watch_filters(watch: Watch) -> WatchFilters:
+    """Return normalized filters for a watch row."""
+
+    try:
+        return WatchFilters.from_dict(watch.structured_filters)
+    except StructuredFilterValidationError as exc:
+        raise WatchValidationError(str(exc)) from exc

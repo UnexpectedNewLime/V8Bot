@@ -46,6 +46,7 @@ def test_watch_service_create_watch_uses_defaults(db_session_factory) -> None:
     assert summary.notify_time == "09:30"
     assert summary.preferred_currency == "AUD"
     assert summary.distance_unit == "km"
+    assert summary.filters.is_empty()
 
 
 def test_watch_service_delivery_target_and_thread_update(db_session_factory) -> None:
@@ -82,6 +83,75 @@ def test_watch_service_list_watches(db_session_factory) -> None:
 
     assert len(summaries) == 1
     assert summaries[0].car_query == "C5 Corvette"
+
+
+def test_watch_service_create_watch_persists_filters(db_session_factory) -> None:
+    service = WatchService(db_session_factory)
+
+    summary = service.create_watch(
+        discord_user_id="123",
+        car_query="C5 Corvette",
+        keywords="manual",
+        exclude_keywords="",
+        notify_time="09:30",
+        price_min=20000,
+        price_max=45000,
+        year_min=2001,
+        year_max=2004,
+        mileage_max=120000,
+        transmission="manual",
+        location="Sydney",
+        radius=50,
+        body_style="coupe",
+        must_have="HUD, targa",
+    )
+    summaries = service.list_watches("123")
+
+    assert summary.filters.price_min is not None
+    assert summary.filters.price_min == 20000
+    assert summary.filters.must_have_terms == ("HUD", "targa")
+    assert summaries[0].filters == summary.filters
+
+
+def test_watch_service_update_filters_and_clear_fields(db_session_factory) -> None:
+    service = WatchService(db_session_factory)
+    summary = service.create_watch(
+        discord_user_id="123",
+        car_query="C5 Corvette",
+        keywords="manual",
+        exclude_keywords="",
+        notify_time="09:30",
+        price_max=40000,
+        body_style="coupe",
+    )
+
+    updated = service.update_filters(
+        "123",
+        summary.watch_id,
+        year_min=2001,
+        must_have="HUD",
+        clear_fields="body_style",
+    )
+
+    assert updated.filters.price_max == 40000
+    assert updated.filters.year_min == 2001
+    assert updated.filters.body_style is None
+    assert updated.filters.must_have_terms == ("HUD",)
+
+
+def test_watch_service_rejects_invalid_structured_filters(db_session_factory) -> None:
+    service = WatchService(db_session_factory)
+
+    with pytest.raises(WatchValidationError, match="year_min"):
+        service.create_watch(
+            discord_user_id="123",
+            car_query="C5 Corvette",
+            keywords="manual",
+            exclude_keywords="",
+            notify_time="09:30",
+            year_min=2004,
+            year_max=2001,
+        )
 
 
 def test_watch_service_deactivate_watch_checks_ownership(db_session_factory) -> None:

@@ -3,9 +3,9 @@
 Purpose-built Discord bot for scheduled car listing watch digests.
 
 V8Bot lets Discord users create car watches with keywords, excluded keywords,
-preferred currency, distance unit, listing sources, and a notification time.
-The bot scrapes sources, dedupes listings, stores matches, and posts digest
-messages to Discord.
+structured filters, preferred currency, distance unit, listing sources, and a
+notification time. The bot scrapes sources, dedupes listings, stores matches,
+and posts digest messages to Discord.
 
 Current source status:
 
@@ -116,6 +116,7 @@ The current Discord interface registers:
 - `/watch_keyword_remove`
 - `/watch_exclude_add`
 - `/watch_exclude_remove`
+- `/watch_filters`
 - `/watch_source_add`
 - `/watch_source_list`
 - `/watch_source_remove`
@@ -138,6 +139,13 @@ exclude_keywords: automatic, convertible
 notify_time: 22:08
 source_url: https://www.autotempest.com/results?localization=any&make=chevrolet&maxyear=2001&minyear=2001&model=corvette&transmission=man&zip=90210
 scrape_now: True
+price_max: 45000
+year_min: 1999
+year_max: 2004
+mileage_max: 160000
+transmission: manual
+body_style: coupe
+must_have: HUD, targa
 ```
 
 `source_name` is optional. If omitted, the bot derives a name from the domain.
@@ -156,6 +164,7 @@ You can also run the flow manually:
 
 ```text
 /watch_add
+/watch_filters
 /watch_source_add
 /watch_scrape_now
 /watch_listings
@@ -163,6 +172,38 @@ You can also run the flow manually:
 
 `/watch_source_add` accepts one or more URLs in its `url` field. The optional
 `name` field can only be used with a single URL.
+
+## Structured Watch Filters
+
+`/watch_add` accepts optional structured filters:
+
+- `price_min` and `price_max` in the watch's preferred currency.
+- `year_min` and `year_max`.
+- `mileage_max` in the watch's preferred distance unit.
+- `transmission`.
+- `location` and optional `radius`.
+- `body_style`.
+- `must_have`, as comma-separated terms that must appear in listing text.
+
+Use `/watch_filters` to edit filters later. Omitted fields stay unchanged.
+Use `clear_fields` with comma-separated field names, or `all`, to remove saved
+filters. Group names such as `price`, `year`, `location_radius`, `body`, and
+`must_have` are also accepted. For example:
+
+```text
+/watch_filters
+watch_id: 1
+price_min: 25000
+price_max: 50000
+transmission: manual
+clear_fields: body_style
+```
+
+Filtering runs in the service layer after scoring and unit/currency conversion,
+before listings are stored for a watch. Listings missing a filtered price,
+year, or mileage value are rejected for that watch. Radius is enforced when a
+source provides distance metadata; otherwise the configured location must match
+the listing location text.
 
 ## Local Scrape Flow Without Discord
 
@@ -174,6 +215,11 @@ PYTHONPATH=src python scripts/local_scrape_flow.py \
   --car-query "C5 Corvette" \
   --keywords "manual, targa, hud" \
   --exclude-keywords "automatic, convertible" \
+  --price-max 45000 \
+  --year-min 1999 \
+  --year-max 2004 \
+  --transmission manual \
+  --must-have "HUD, targa" \
   --notify-time "22:08" \
   --source-name "AutoTempest Local" \
   --source-url "https://www.autotempest.com/results?localization=any&make=chevrolet&maxyear=2001&minyear=2001&model=corvette&transmission=man&zip=90210"
@@ -249,7 +295,7 @@ Useful queries:
 
 ```sql
 select id, discord_user_id from users;
-select id, user_id, name, query, notification_time from watches;
+select id, user_id, name, query, notification_time, structured_filters from watches;
 select id, name, kind, base_url, is_active from sources;
 select id, title, url, price_amount, mileage_value from listings;
 ```

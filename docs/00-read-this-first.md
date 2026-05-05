@@ -23,7 +23,8 @@ describe the code that exists now.
 ## Current Capabilities
 
 - Watches store a car query, included keywords, excluded keywords, notification
-  time, preferred currency, distance unit, Discord channel, and resolved thread.
+  time, structured filters, preferred currency, distance unit, Discord channel,
+  and resolved thread.
 - Sources can be added to a watch from one or more URLs. Blank names are derived
   from the domain and made unique per user.
 - Registered scheduled source kinds are `mock`, `autotempest`, `cars_on_line`,
@@ -32,6 +33,9 @@ describe the code that exists now.
   configured to reject unregistered source kinds.
 - Manual commands can scrape immediately and post new listing embeds to the
   watch thread. Posted listings are then marked sent.
+- Structured watch filters can reject listings by price, year, mileage,
+  transmission, location/radius, body style, and must-have terms before they are
+  stored as watch matches.
 - Scheduled scrape collection stores matching listings silently.
 - Scheduled digest checks post pending listings, or a no-update confirmation,
   when a watch's local notification time is due.
@@ -53,8 +57,8 @@ describe the code that exists now.
 ## Important Current Limitations
 
 - There is no migration framework. `init_database` creates tables and includes
-  one compatibility helper that adds `watches.thread_id` to older local SQLite
-  databases.
+  compatibility helpers that add `watches.thread_id` and
+  `watches.structured_filters` to older local SQLite databases.
 - There is no `DigestBatch` table in the current schema. Digest state is tracked
   through `watch_listings.status`, `watch_listings.sent_at`, and
   `watches.last_digest_sent_at`.

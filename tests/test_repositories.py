@@ -37,6 +37,36 @@ def test_init_database_adds_thread_id_to_existing_watch_table() -> None:
     assert "thread_id" in columns
 
 
+def test_init_database_adds_structured_filters_to_existing_watch_table() -> None:
+    engine = create_database_engine("sqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE watches ("
+                "id INTEGER PRIMARY KEY, "
+                "user_id INTEGER NOT NULL, "
+                "name VARCHAR(120) NOT NULL"
+                ")"
+            )
+        )
+
+    init_database(engine)
+
+    with engine.connect() as connection:
+        columns = {
+            row[1]
+            for row in connection.execute(text("PRAGMA table_info(watches)")).fetchall()
+        }
+        default_value = connection.execute(
+            text(
+                "select dflt_value from pragma_table_info('watches') "
+                "where name = 'structured_filters'"
+            )
+        ).scalar_one()
+    assert "structured_filters" in columns
+    assert default_value == "'{}'"
+
+
 def test_user_creation_is_idempotent(db_session) -> None:
     users = UserRepository(db_session)
 
@@ -55,9 +85,11 @@ def test_watch_creation_and_active_listing(db_session) -> None:
         name="C5 watch",
         query="C5 Corvette",
         included_keywords=["manual"],
+        structured_filters={"price_max": "40000"},
     )
 
     assert watch in watches.list_active_for_user(user.id)
+    assert watch.structured_filters == {"price_max": "40000"}
 
 
 def test_watch_thread_id_can_be_persisted(db_session) -> None:
@@ -137,7 +169,10 @@ def test_unnotified_listing_retrieval_and_mark_notified(db_session) -> None:
         included_keywords=["manual"],
     )
     source = SourceRepository(db_session).create_source(name="Mock Cars")
-    candidate = ListingCandidate(title="C5 Corvette manual", url="https://example.test/c5")
+    candidate = ListingCandidate(
+        title="C5 Corvette manual",
+        url="https://example.test/c5",
+    )
     score = ScoreResult(score=10, is_match=True, reasons=["keyword matched: manual"])
     listings = ListingRepository(db_session)
 
