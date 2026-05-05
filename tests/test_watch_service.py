@@ -63,11 +63,15 @@ def test_watch_service_delivery_target_and_thread_update(db_session_factory) -> 
 
     target = service.get_delivery_target("123", summary.watch_id)
     updated_target = service.set_thread_id("123", summary.watch_id, "555")
+    starred_target = service.set_starred_thread_id("123", summary.watch_id, "777")
 
     assert target.channel_id == "999"
     assert target.thread_id is None
+    assert target.starred_thread_id is None
     assert updated_target.thread_id == "555"
+    assert starred_target.starred_thread_id == "777"
     assert service.get_delivery_target("123", summary.watch_id).thread_id == "555"
+    assert service.get_delivery_target("123", summary.watch_id).starred_thread_id == "777"
 
 
 def test_watch_service_list_watches(db_session_factory) -> None:

@@ -518,6 +518,25 @@ class WatchService:
             session.commit()
             return target
 
+    def set_starred_thread_id(
+        self,
+        discord_user_id: str,
+        watch_id: int,
+        thread_id: str | None,
+    ) -> WatchDeliveryTarget:
+        """Persist a Discord starred thread id for an owned active watch."""
+
+        with self.session_factory() as session:
+            user = UserRepository(session).get_or_create_by_discord_id(discord_user_id)
+            watch_repository = WatchRepository(session)
+            watch = watch_repository.get_active_for_user(watch_id, user.id)
+            if watch is None:
+                raise WatchNotFoundError("watch not found")
+            watch_repository.set_starred_thread_id(watch.id, thread_id)
+            target = self._delivery_target(watch)
+            session.commit()
+            return target
+
     def _get_owned_watch(
         self,
         session: Session,
@@ -550,6 +569,7 @@ class WatchService:
             included_keywords=list(watch.included_keywords),
             channel_id=watch.channel_id,
             thread_id=watch.thread_id,
+            starred_thread_id=watch.starred_thread_id,
         )
 
     def _watch_summary(self, watch: Watch, active_sources_count: int) -> WatchSummary:
