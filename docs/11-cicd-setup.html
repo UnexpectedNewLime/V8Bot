@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>V8Bot — CI/CD Setup</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 15px;
+      line-height: 1.7;
+      color: #1a1a1a;
+      background: #f5f5f5;
+      padding: 2rem 1rem;
+    }
+
+    .page {
+      max-width: 860px;
+      margin: 0 auto;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+      overflow: hidden;
+    }
+
+    header {
+      background: #0d1117;
+      color: #e6edf3;
+      padding: 2.5rem 2.5rem 2rem;
+    }
+
+    header h1 {
+      font-size: 1.6rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.4rem;
+    }
+
+    header p {
+      color: #8b949e;
+      font-size: 0.95rem;
+    }
+
+    nav {
+      background: #f6f8fa;
+      border-bottom: 1px solid #d0d7de;
+      padding: 1.25rem 2.5rem;
+    }
+
+    nav h2 {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #57606a;
+      margin-bottom: 0.6rem;
+    }
+
+    nav ol {
+      list-style: none;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem 0;
+    }
+
+    nav ol li {
+      width: 100%;
+    }
+
+    nav a {
+      color: #0969da;
+      text-decoration: none;
+      font-size: 0.875rem;
+    }
+
+    nav a:hover { text-decoration: underline; }
+
+    .content {
+      padding: 2.5rem;
+    }
+
+    /* What's in the repo */
+    .repo-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+      margin-bottom: 2.5rem;
+    }
+
+    .repo-table th {
+      background: #f6f8fa;
+      text-align: left;
+      padding: 0.6rem 0.9rem;
+      border: 1px solid #d0d7de;
+      font-weight: 600;
+      color: #24292f;
+    }
+
+    .repo-table td {
+      padding: 0.6rem 0.9rem;
+      border: 1px solid #d0d7de;
+      vertical-align: top;
+    }
+
+    .repo-table td:first-child {
+      white-space: nowrap;
+    }
+
+    /* Steps */
+    .step {
+      margin-bottom: 3rem;
+    }
+
+    .step-header {
+      display: flex;
+      align-items: center;
+      gap: 0.9rem;
+      margin-bottom: 1rem;
+    }
+
+    .step-number {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 2rem;
+      height: 2rem;
+      border-radius: 50%;
+      background: #0969da;
+      color: #fff;
+      font-weight: 700;
+      font-size: 0.875rem;
+      flex-shrink: 0;
+    }
+
+    .step-title {
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: #24292f;
+    }
+
+    .step-badge {
+      display: inline-block;
+      padding: 0.15rem 0.55rem;
+      border-radius: 2rem;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-left: 0.4rem;
+      vertical-align: middle;
+    }
+
+    .badge-server  { background: #ddf4ff; color: #0550ae; }
+    .badge-github  { background: #fff8c5; color: #7d4e00; }
+    .badge-ts      { background: #e8f8f3; color: #116329; }
+
+    .step p, .step li {
+      color: #24292f;
+      margin-bottom: 0.5rem;
+    }
+
+    .step ul, .step ol {
+      padding-left: 1.4rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .step ol li { list-style: decimal; }
+    .step ul li { list-style: disc; }
+
+    p + p { margin-top: 0.5rem; }
+
+    code {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 0.825rem;
+      background: #f6f8fa;
+      border: 1px solid #d0d7de;
+      border-radius: 4px;
+      padding: 0.1em 0.35em;
+    }
+
+    pre {
+      background: #0d1117;
+      color: #e6edf3;
+      border-radius: 6px;
+      padding: 1.1rem 1.25rem;
+      overflow-x: auto;
+      margin: 0.75rem 0 1rem;
+      font-size: 0.825rem;
+      line-height: 1.6;
+    }
+
+    pre code {
+      background: none;
+      border: none;
+      padding: 0;
+      color: inherit;
+      font-size: inherit;
+    }
+
+    .comment { color: #8b949e; }
+    .cmd     { color: #79c0ff; }
+    .str     { color: #a5d6ff; }
+    .key     { color: #ff7b72; }
+
+    .callout {
+      border-left: 3px solid #0969da;
+      background: #ddf4ff;
+      border-radius: 0 6px 6px 0;
+      padding: 0.8rem 1.1rem;
+      margin: 0.75rem 0;
+      font-size: 0.875rem;
+      color: #0550ae;
+    }
+
+    .callout.warn {
+      border-color: #d29922;
+      background: #fff8c5;
+      color: #7d4e00;
+    }
+
+    .secrets-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+      margin: 0.75rem 0 1rem;
+    }
+
+    .secrets-table th {
+      background: #f6f8fa;
+      text-align: left;
+      padding: 0.55rem 0.9rem;
+      border: 1px solid #d0d7de;
+      font-weight: 600;
+    }
+
+    .secrets-table td {
+      padding: 0.55rem 0.9rem;
+      border: 1px solid #d0d7de;
+      vertical-align: top;
+    }
+
+    .secrets-table tr:nth-child(even) td { background: #f6f8fa; }
+
+    hr {
+      border: none;
+      border-top: 1px solid #d0d7de;
+      margin: 2.5rem 0;
+    }
+
+    .verify-block {
+      background: #f6f8fa;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      padding: 1.25rem 1.5rem;
+    }
+
+    .verify-block h3 {
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin-bottom: 0.6rem;
+      color: #24292f;
+    }
+
+    footer {
+      background: #f6f8fa;
+      border-top: 1px solid #d0d7de;
+      padding: 1.25rem 2.5rem;
+      font-size: 0.8rem;
+      color: #57606a;
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <h1>V8Bot — CI/CD Setup</h1>
+    <p>One-time external configuration to activate the GitHub Actions workflows already committed to this repository.</p>
+  </header>
+
+  <nav>
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#whats-in-the-repo">What is already in the repo</a></li>
+      <li><a href="#step1">Step 1 — Server: create the deployment directory</a></li>
+      <li><a href="#step2">Step 2 — Server: generate a deploy SSH key</a></li>
+      <li><a href="#step3">Step 3 — Tailscale: create an OAuth client</a></li>
+      <li><a href="#step4">Step 4 — GitHub: add repository secrets</a></li>
+      <li><a href="#step5">Step 5 — GitHub: set GHCR package visibility</a></li>
+      <li><a href="#step6">Step 6 — GitHub: block direct pushes and enforce CI on main</a></li>
+      <li><a href="#verify">Verifying the setup</a></li>
+      <li><a href="#ongoing">How future deploys work</a></li>
+    </ol>
+  </nav>
+
+  <div class="content">
+
+    <!-- What's in the repo -->
+    <section id="whats-in-the-repo">
+      <table class="repo-table">
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Purpose</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>.github/workflows/run-tests.yml</code></td>
+            <td>Runs <code>pytest</code> and <code>compileall</code> on every push and pull request to every branch</td>
+          </tr>
+          <tr>
+            <td><code>.github/workflows/deploy.yml</code></td>
+            <td>Builds the Docker image, pushes it to GHCR, and deploys to the production server — triggers only on pushes to <code>main</code></td>
+          </tr>
+          <tr>
+            <td><code>docker-compose.deploy.yml</code></td>
+            <td>Production compose file with no build stanza — pulls the pre-built image from GHCR. The deploy workflow copies this to the server on every deploy.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout">
+        The deploy workflow contains no test job. It relies on branch protection (Step 6) to guarantee that only tested code reaches <code>main</code>, avoiding duplicate test runs and preventing flaky tests from blocking live deployments.
+      </div>
+    </section>
+
+    <hr>
+
+    <!-- Step 1 -->
+    <section class="step" id="step1">
+      <div class="step-header">
+        <div class="step-number">1</div>
+        <div class="step-title">Create the deployment directory <span class="step-badge badge-server">Server</span></div>
+      </div>
+
+      <p>SSH into the production server and create a working directory for the bot. This is where the compose file, <code>.env</code>, and the SQLite database will live.</p>
+
+      <pre><code>mkdir -p ~/v8bot/data</code></pre>
+
+      <p>Create the production <code>.env</code> file:</p>
+
+      <pre><code>nano ~/v8bot/.env</code></pre>
+
+      <p>Minimum required values:</p>
+
+      <pre><code><span class="comment"># Required</span>
+DISCORD_BOT_TOKEN=your_production_token
+DISCORD_GUILD_ID=your_guild_id</code></pre>
+
+      <p>The full list of supported settings is documented in <code>.env.example</code> at the repository root. Key optional settings include <code>SCRAPE_INTERVAL_MINUTES</code>, <code>SCRAPER_USER_AGENT</code>, and <code>LOG_LEVEL</code>.</p>
+
+      <div class="callout warn">
+        Use a dedicated production Discord bot token — never reuse a development token. Running the same token in two places simultaneously will cause one instance to be disconnected by Discord.
+      </div>
+    </section>
+
+    <!-- Step 2 -->
+    <section class="step" id="step2">
+      <div class="step-header">
+        <div class="step-number">2</div>
+        <div class="step-title">Generate a deploy SSH key <span class="step-badge badge-server">Server</span></div>
+      </div>
+
+      <p>The Actions runner needs to SSH into the server to copy files and restart the container. Generate a dedicated key pair so it can be revoked independently of your personal keys.</p>
+
+      <p>Run these commands on the server:</p>
+
+      <pre><code><span class="comment"># Generate key pair with no passphrase</span>
+ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/deploy_key -N ""
+
+<span class="comment"># Authorise the public key on this server</span>
+cat ~/.ssh/deploy_key.pub >> ~/.ssh/authorized_keys</code></pre>
+
+      <p>Print the private key — you will paste this into a GitHub secret in Step 4:</p>
+
+      <pre><code>cat ~/.ssh/deploy_key</code></pre>
+
+      <p>Copy everything from <code>-----BEGIN OPENSSH PRIVATE KEY-----</code> to <code>-----END OPENSSH PRIVATE KEY-----</code> inclusive. Keep this value safe.</p>
+    </section>
+
+    <!-- Step 3 -->
+    <section class="step" id="step3">
+      <div class="step-header">
+        <div class="step-number">3</div>
+        <div class="step-title">Create a Tailscale OAuth client <span class="step-badge badge-ts">Tailscale</span></div>
+      </div>
+
+      <p>The deploy workflow uses the official <code>tailscale/github-action</code> to join the Actions runner to your Tailscale network as an ephemeral node. This allows the runner to reach the server by its Tailscale hostname or IP without exposing SSH to the public internet.</p>
+
+      <p><strong>Create the OAuth client:</strong></p>
+      <ol>
+        <li>Open the Tailscale admin console → <strong>Settings</strong> → <strong>OAuth clients</strong>.</li>
+        <li>Click <strong>Generate OAuth client</strong>.</li>
+        <li>Set scope to <strong>Devices → Write</strong>.</li>
+        <li>Click <strong>Generate client</strong>.</li>
+        <li>Copy the <strong>Client ID</strong> and <strong>Client secret</strong>. The secret is shown only once.</li>
+      </ol>
+
+      <p><strong>Authorise the <code>tag:ci</code> tag in your ACL policy:</strong></p>
+      <p>The workflow tags the ephemeral runner node as <code>tag:ci</code>. Tailscale requires this tag to be declared in the ACL before it can be assigned. In the admin console open <strong>Access Controls</strong> and add to the <code>tagOwners</code> block:</p>
+
+      <pre><code>"tagOwners": {
+  "tag:ci": ["autogroup:admin"]
+}</code></pre>
+
+      <div class="callout">
+        The ephemeral node is automatically removed from your Tailscale network when the Actions job finishes, so it will not accumulate in your device list.
+      </div>
+    </section>
+
+    <!-- Step 4 -->
+    <section class="step" id="step4">
+      <div class="step-header">
+        <div class="step-number">4</div>
+        <div class="step-title">Add repository secrets <span class="step-badge badge-github">GitHub</span></div>
+      </div>
+
+      <p>Go to your repository → <strong>Settings</strong> → <strong>Secrets and variables</strong> → <strong>Actions</strong> and create the following secrets:</p>
+
+      <table class="secrets-table">
+        <thead>
+          <tr>
+            <th>Secret name</th>
+            <th>Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>TAILSCALE_OAUTH_CLIENT_ID</code></td>
+            <td>Client ID from Step 3</td>
+          </tr>
+          <tr>
+            <td><code>TAILSCALE_OAUTH_CLIENT_SECRET</code></td>
+            <td>Client secret from Step 3</td>
+          </tr>
+          <tr>
+            <td><code>DEPLOY_HOST</code></td>
+            <td>Tailscale machine name or IP of the server — e.g. <code>my-server</code> or <code>100.x.x.x</code>. Find this in the Tailscale admin console under <strong>Machines</strong>.</td>
+          </tr>
+          <tr>
+            <td><code>DEPLOY_USER</code></td>
+            <td>SSH username on the server, e.g. <code>ubuntu</code> or <code>lime</code></td>
+          </tr>
+          <tr>
+            <td><code>DEPLOY_SSH_KEY</code></td>
+            <td>Full private key from <code>~/.ssh/deploy_key</code> on the server, including the <code>-----BEGIN</code> and <code>-----END</code> lines</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout">
+        <code>GITHUB_TOKEN</code> is provided automatically by GitHub and does not need to be created. It is used by the deploy workflow to authenticate with GHCR when pushing the Docker image.
+      </div>
+    </section>
+
+    <!-- Step 5 -->
+    <section class="step" id="step5">
+      <div class="step-header">
+        <div class="step-number">5</div>
+        <div class="step-title">Set GHCR package visibility <span class="step-badge badge-github">GitHub</span></div>
+      </div>
+
+      <p>The first time the deploy workflow runs it will push the image to GitHub Container Registry under your account. By default new packages are private, which means the server cannot pull without authentication.</p>
+
+      <p>After the first successful push to <code>main</code>:</p>
+      <ol>
+        <li>Go to <strong>github.com/UnexpectedNewLime</strong> → <strong>Packages</strong> → <strong>v8bot</strong>.</li>
+        <li>Click <strong>Package settings</strong> (bottom of the sidebar).</li>
+        <li>Under <em>Danger Zone</em>, set visibility to <strong>Public</strong>.</li>
+      </ol>
+
+      <p>This allows the server to pull with a plain <code>docker pull</code> and no credentials.</p>
+
+      <p><strong>Prefer to keep the image private?</strong> Log in to GHCR on the server once instead. Create a GitHub Personal Access Token (PAT) with the <code>read:packages</code> scope at <strong>github.com/settings/tokens</strong>, then run:</p>
+
+      <pre><code>echo YOUR_PAT | docker login ghcr.io -u UnexpectedNewLime --password-stdin</code></pre>
+
+      <p>Docker will store the credential in the server's credential store and use it automatically on subsequent pulls.</p>
+    </section>
+
+    <!-- Step 6 -->
+    <section class="step" id="step6">
+      <div class="step-header">
+        <div class="step-number">6</div>
+        <div class="step-title">Block direct pushes and enforce CI on main <span class="step-badge badge-github">GitHub</span></div>
+      </div>
+
+      <p>This step does two things: blocks direct pushes to <code>main</code> so that all changes must go through a pull request, and enforces that CI passes before any PR can be merged. Together these form the guarantee that lets the deploy workflow skip running tests.</p>
+
+      <ol>
+        <li>Go to the repository → <strong>Settings</strong> → <strong>Branches</strong>.</li>
+        <li>Click <strong>Add branch protection rule</strong>.</li>
+        <li>Set <em>Branch name pattern</em> to <code>main</code>.</li>
+        <li>Check <strong>Require a pull request before merging</strong>. This is what prevents anyone — including you — from pushing commits directly to <code>main</code>. Every change must arrive via a PR.</li>
+        <li>Check <strong>Require status checks to pass before merging</strong>.</li>
+        <li>In the search box that appears, type <code>test</code> and select the <code>test</code> job — this is the job defined in <code>run-tests.yml</code>. It must have run at least once on this repo for it to appear in the list, so open and push a PR first if needed.</li>
+        <li>Check <strong>Require branches to be up to date before merging</strong>. This prevents a PR from merging if <code>main</code> has moved forward since the branch was last tested.</li>
+        <li>Check <strong>Block force pushes</strong>. This prevents the branch history from being rewritten even by someone with admin access.</li>
+        <li>Check <strong>Do not allow bypassing the above settings</strong>. Without this, repository admins can still push directly to <code>main</code> and merge without passing CI.</li>
+        <li>Click <strong>Save changes</strong>.</li>
+      </ol>
+
+      <div class="callout warn">
+        The <code>test</code> status check will not appear in the search list until the CI workflow has run at least once. Open a PR from any branch to trigger it, then come back and complete this step.
+      </div>
+
+      <div class="callout">
+        Once this rule is saved, even direct pushes from the command line will be rejected with <em>"protected branch hook declined"</em>. All changes to <code>main</code> must go through a PR with a passing CI run.
+      </div>
+    </section>
+
+    <hr>
+
+    <!-- Verify -->
+    <section id="verify">
+      <div class="step-header">
+        <div class="step-number" style="background:#1a7f37">✓</div>
+        <div class="step-title">Verifying the setup</div>
+      </div>
+
+      <p>Push or merge a change to <code>main</code> and check the following:</p>
+
+      <div class="verify-block">
+        <h3>GitHub Actions tab</h3>
+        <ul>
+          <li>Both <code>CI</code> and <code>Deploy</code> workflows should appear.</li>
+          <li>Inside <code>Deploy</code>, you should see the Tailscale connection step, the <code>docker pull</code>, and the <code>docker compose up -d</code> complete without errors.</li>
+        </ul>
+      </div>
+
+      <br>
+
+      <div class="verify-block">
+        <h3>On the server</h3>
+        <pre><code><span class="comment"># Container should be running</span>
+docker ps
+
+<span class="comment"># Logs should include "Shard ID None has connected to Gateway"</span>
+docker logs car-watch-bot
+
+<span class="comment"># Image should show :latest and the commit SHA tag</span>
+docker image ls ghcr.io/unexpectednewlime/v8bot</code></pre>
+      </div>
+    </section>
+
+    <hr>
+
+    <!-- Ongoing -->
+    <section id="ongoing">
+      <div class="step-header">
+        <div class="step-number" style="background:#57606a">↻</div>
+        <div class="step-title">How future deploys work</div>
+      </div>
+
+      <p>No further manual steps are needed. Every merge to <code>main</code> follows this path automatically:</p>
+
+      <ol>
+        <li>A PR branch is pushed — <code>run-tests.yml</code> runs <code>pytest</code> and <code>compileall</code>.</li>
+        <li>Branch protection blocks the merge until the <code>test</code> job passes.</li>
+        <li>The PR is merged to <code>main</code> — <code>deploy.yml</code> triggers.</li>
+        <li>The Docker image is built and pushed to GHCR tagged <code>:latest</code> and <code>:&lt;sha&gt;</code>.</li>
+        <li>The Actions runner joins your Tailscale network, copies <code>docker-compose.deploy.yml</code> to the server, pulls the new image, and runs <code>docker compose up -d</code>.</li>
+        <li>The previous container is replaced with zero manual intervention.</li>
+      </ol>
+
+      <p>The SQLite database at <code>~/v8bot/data/car_watch_bot.sqlite3</code> persists across deploys via the volume mount in <code>docker-compose.deploy.yml</code>.</p>
+    </section>
+
+  </div>
+
+  <footer>
+    V8Bot · <code>.github/workflows/run-tests.yml</code> · <code>.github/workflows/deploy.yml</code> · <code>docker-compose.deploy.yml</code>
+  </footer>
+
+</div>
+</body>
+</html>
