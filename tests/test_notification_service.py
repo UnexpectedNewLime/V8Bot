@@ -135,6 +135,131 @@ def test_empty_due_digest_sends_no_update_message(db_session_factory) -> None:
     assert last_sent is not None
 
 
+def test_empty_due_digest_can_suppress_no_update_message(db_session_factory) -> None:
+    with db_session_factory() as session:
+        user = UserRepository(session).get_or_create_by_discord_id("123")
+        watch = WatchRepository(session).create_watch(
+            user_id=user.id,
+            name="Empty digest",
+            query="C5 Corvette",
+            included_keywords=["manual"],
+            notification_time=time(hour=9, minute=30),
+            channel_id="999",
+            timezone="Australia/Sydney",
+        )
+        watch.digest_no_update_enabled = False
+        watch_id = watch.id
+        session.commit()
+    sender = FakeDigestSender()
+    service = NotificationService(db_session_factory, sender)
+    now = datetime(2026, 4, 28, 9, 30, tzinfo=ZoneInfo("Australia/Sydney"))
+
+    sent_count = asyncio.run(service.send_due_digests(now))
+
+    with db_session_factory() as session:
+        db_watch = session.get(Watch, watch_id)
+        assert db_watch is not None
+        last_sent = db_watch.last_digest_sent_at
+
+    assert sent_count == 0
+    assert sender.sent_digests == []
+    assert sender.no_update_messages == []
+    assert last_sent is None
+
+
+def test_due_digest_respects_max_listing_limit(db_session_factory) -> None:
+    watch_id = _seed_due_watch_with_listings(db_session_factory)
+    with db_session_factory() as session:
+        watch = session.get(Watch, watch_id)
+        assert watch is not None
+        watch.digest_max_listings = 2
+        session.commit()
+    sender = FakeDigestSender()
+    service = NotificationService(db_session_factory, sender)
+    now = datetime(2026, 4, 28, 9, 30, tzinfo=ZoneInfo("Australia/Sydney"))
+
+    sent_count = asyncio.run(service.send_due_digests(now))
+
+    with db_session_factory() as session:
+        pending = ListingRepository(session).list_unnotified_for_watch(watch_id)
+    assert sent_count == 1
+    assert sender.sent_digests[0][1].listing_count == 2
+    assert len(pending) == 1
+
+
+def test_due_digest_can_send_summary_only_payload(db_session_factory) -> None:
+    watch_id = _seed_due_watch_with_listings(db_session_factory)
+    with db_session_factory() as session:
+        watch = session.get(Watch, watch_id)
+        assert watch is not None
+        watch.digest_summary_only = True
+        session.commit()
+    sender = FakeDigestSender()
+    service = NotificationService(db_session_factory, sender)
+    now = datetime(2026, 4, 28, 9, 30, tzinfo=ZoneInfo("Australia/Sydney"))
+
+    sent_count = asyncio.run(service.send_due_digests(now))
+
+    assert sent_count == 1
+    assert sender.sent_digests[0][1].summary_only is True
+
+
+def test_due_digest_skips_quiet_hours(db_session_factory) -> None:
+    watch_id = _seed_due_watch_with_listings(db_session_factory)
+    with db_session_factory() as session:
+        watch = session.get(Watch, watch_id)
+        assert watch is not None
+        watch.digest_quiet_hours_start = time(hour=9)
+        watch.digest_quiet_hours_end = time(hour=10)
+        session.commit()
+    sender = FakeDigestSender()
+    service = NotificationService(db_session_factory, sender)
+    now = datetime(2026, 4, 28, 9, 30, tzinfo=ZoneInfo("Australia/Sydney"))
+
+    sent_count = asyncio.run(service.send_due_digests(now))
+
+    with db_session_factory() as session:
+        pending = ListingRepository(session).list_unnotified_for_watch(watch_id)
+    assert sent_count == 0
+    assert sender.sent_digests == []
+    assert len(pending) == 3
+
+
+def test_due_digest_uses_frequency_slots(db_session_factory) -> None:
+    watch_id = _seed_due_watch_with_listings(db_session_factory)
+    with db_session_factory() as session:
+        watch = session.get(Watch, watch_id)
+        assert watch is not None
+        watch.digest_frequency_minutes = 120
+        session.commit()
+    sender = FakeDigestSender()
+    service = NotificationService(db_session_factory, sender)
+    now = datetime(2026, 4, 28, 11, 30, tzinfo=ZoneInfo("Australia/Sydney"))
+
+    sent_count = asyncio.run(service.send_due_digests(now))
+
+    assert sent_count == 1
+    assert len(sender.sent_digests) == 1
+
+
+def test_due_digest_frequency_throttles_recent_sends(db_session_factory) -> None:
+    watch_id = _seed_due_watch_with_listings(db_session_factory)
+    with db_session_factory() as session:
+        watch = session.get(Watch, watch_id)
+        assert watch is not None
+        watch.digest_frequency_minutes = 120
+        watch.last_digest_sent_at = datetime(2026, 4, 28, 0, 30)
+        session.commit()
+    sender = FakeDigestSender()
+    service = NotificationService(db_session_factory, sender)
+    now = datetime(2026, 4, 28, 11, 30, tzinfo=ZoneInfo("Australia/Sydney"))
+
+    sent_count = asyncio.run(service.send_due_digests(now))
+
+    assert sent_count == 0
+    assert sender.sent_digests == []
+
+
 def test_due_digest_persists_resolved_thread_id(db_session_factory) -> None:
     watch_id = _seed_due_watch_with_listings(db_session_factory)
     sender = FakeDigestSender()

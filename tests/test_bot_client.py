@@ -25,6 +25,8 @@ def test_create_bot_client_registers_expected_commands(db_session_factory) -> No
         "watch_add",
         "watch_currency",
         "watch_distance_unit",
+        "watch_digest_edit",
+        "watch_digest_show",
         "watch_exclude_add",
         "watch_exclude_remove",
         "watch_keyword_add",

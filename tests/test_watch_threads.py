@@ -180,6 +180,34 @@ def test_discord_digest_sender_reuses_created_thread_for_each_embed() -> None:
     assert channel.created_threads[0].sent_messages[0]["view"].is_persistent()
 
 
+def test_discord_digest_sender_can_send_summary_only_message() -> None:
+    client = FakeClient()
+    channel = FakeChannel()
+    client.channels[123] = channel
+    sender = DiscordDigestSender(client)
+    digest = DigestPayload(
+        watch_name="C5 Corvette",
+        watch_query="C5 Corvette",
+        listing_count=2,
+        listings=[_listing(1), _listing(2)],
+        summary_only=True,
+    )
+
+    thread_id = asyncio.run(sender.send_digest(_target(), digest))
+
+    assert thread_id == "900"
+    assert len(channel.created_threads) == 1
+    assert channel.created_threads[0].sent_messages == [
+        {
+            "content": (
+                "C5 Corvette: 2 new listings. "
+                "Use `/watch_listings watch_id:42` to review them."
+            ),
+            "silent": True,
+        }
+    ]
+
+
 def _listing(listing_id: int) -> DigestListing:
     return DigestListing(
         listing_id=listing_id,

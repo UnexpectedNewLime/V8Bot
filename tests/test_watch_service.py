@@ -50,6 +50,93 @@ def test_watch_service_create_watch_uses_defaults(db_session_factory) -> None:
     assert summary.distance_unit == "km"
 
 
+def test_watch_service_updates_digest_controls(db_session_factory) -> None:
+    service = WatchService(db_session_factory)
+    summary = service.create_watch(
+        discord_user_id="123",
+        car_query="C5 Corvette",
+        keywords="manual",
+        exclude_keywords="",
+        notify_time="09:30",
+    )
+
+    controls = service.update_digest_controls(
+        discord_user_id="123",
+        watch_id=summary.watch_id,
+        no_update_messages=False,
+        max_listings=5,
+        summary_only=True,
+        immediate_alerts=True,
+        quiet_hours_start="22:00",
+        quiet_hours_end="07:00",
+        digest_frequency_minutes=720,
+    )
+
+    assert controls.no_update_messages is False
+    assert controls.max_listings == 5
+    assert controls.summary_only is True
+    assert controls.immediate_alerts is True
+    assert controls.quiet_hours_start == "22:00"
+    assert controls.quiet_hours_end == "07:00"
+    assert controls.digest_frequency_minutes == 720
+    assert service.get_digest_controls("123", summary.watch_id) == controls
+
+
+def test_watch_service_clears_digest_controls(db_session_factory) -> None:
+    service = WatchService(db_session_factory)
+    summary = service.create_watch(
+        discord_user_id="123",
+        car_query="C5 Corvette",
+        keywords="manual",
+        exclude_keywords="",
+        notify_time="09:30",
+    )
+    service.update_digest_controls(
+        "123",
+        summary.watch_id,
+        max_listings=5,
+        quiet_hours_start="22:00",
+        quiet_hours_end="07:00",
+    )
+
+    controls = service.update_digest_controls(
+        "123",
+        summary.watch_id,
+        clear_max_listings=True,
+        clear_quiet_hours=True,
+    )
+
+    assert controls.max_listings is None
+    assert controls.quiet_hours_start is None
+    assert controls.quiet_hours_end is None
+
+
+def test_watch_service_validates_digest_controls(db_session_factory) -> None:
+    service = WatchService(db_session_factory)
+    summary = service.create_watch(
+        discord_user_id="123",
+        car_query="C5 Corvette",
+        keywords="manual",
+        exclude_keywords="",
+        notify_time="09:30",
+    )
+
+    with pytest.raises(WatchValidationError, match="max_listings"):
+        service.update_digest_controls("123", summary.watch_id, max_listings=0)
+    with pytest.raises(WatchValidationError, match="supplied together"):
+        service.update_digest_controls(
+            "123",
+            summary.watch_id,
+            quiet_hours_start="22:00",
+        )
+    with pytest.raises(WatchValidationError, match="digest_frequency_minutes"):
+        service.update_digest_controls(
+            "123",
+            summary.watch_id,
+            digest_frequency_minutes=10081,
+        )
+
+
 def test_watch_service_delivery_target_and_thread_update(db_session_factory) -> None:
     service = WatchService(db_session_factory)
     summary = service.create_watch(
