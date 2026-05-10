@@ -5,7 +5,9 @@ import asyncio
 from car_watch_bot.bot.client import DiscordDigestSender
 from car_watch_bot.bot.watch_threads import (
     DISCORD_THREAD_NAME_LIMIT,
+    build_starred_watch_thread_name,
     build_watch_thread_name,
+    resolve_starred_watch_thread,
     resolve_watch_thread,
 )
 from car_watch_bot.core.models import DigestListing, DigestPayload, WatchDeliveryTarget
@@ -77,6 +79,7 @@ def _target(thread_id: str | None = None) -> WatchDeliveryTarget:
         included_keywords=["manual", "targa", "C5"],
         channel_id="123",
         thread_id=thread_id,
+        starred_thread_id=None,
     )
 
 
@@ -84,6 +87,12 @@ def test_build_watch_thread_name_is_meaningful_and_stable() -> None:
     name = build_watch_thread_name(_target())
 
     assert name == "V8Bot: C5 Corvette - manual targa #42"
+
+
+def test_build_starred_watch_thread_name_prefixes_watch_thread_name() -> None:
+    name = build_starred_watch_thread_name(_target())
+
+    assert name == "Starred V8Bot: C5 Corvette - manual targa #42"
 
 
 def test_build_watch_thread_name_truncates_long_inputs() -> None:
@@ -94,6 +103,7 @@ def test_build_watch_thread_name_truncates_long_inputs() -> None:
         included_keywords=["manual", "targa", "heads up display"],
         channel_id="123",
         thread_id=None,
+        starred_thread_id=None,
     )
 
     name = build_watch_thread_name(target)
@@ -107,7 +117,9 @@ def test_resolve_watch_thread_reuses_and_unarchives_stored_thread() -> None:
     stored_thread = FakeThread(555, archived=True)
     client.channels[555] = stored_thread
 
-    resolved_thread = asyncio.run(resolve_watch_thread(client, _target(thread_id="555")))
+    resolved_thread = asyncio.run(
+        resolve_watch_thread(client, _target(thread_id="555"))
+    )
 
     assert resolved_thread is stored_thread
     assert stored_thread.archived is False
@@ -120,10 +132,27 @@ def test_resolve_watch_thread_recovers_deleted_thread_with_replacement() -> None
     client.channels[123] = channel
     client.fetch_missing_ids.add(555)
 
-    resolved_thread = asyncio.run(resolve_watch_thread(client, _target(thread_id="555")))
+    resolved_thread = asyncio.run(
+        resolve_watch_thread(client, _target(thread_id="555"))
+    )
 
     assert resolved_thread is channel.created_threads[0]
     assert channel.thread_kwargs[0]["name"] == "V8Bot: C5 Corvette - manual targa #42"
+    assert channel.thread_kwargs[0]["type"].name == "public_thread"
+
+
+def test_resolve_starred_watch_thread_creates_shortlist_thread() -> None:
+    client = FakeClient()
+    channel = FakeChannel()
+    client.channels[123] = channel
+
+    resolved_thread = asyncio.run(resolve_starred_watch_thread(client, _target()))
+
+    assert resolved_thread is channel.created_threads[0]
+    assert (
+        channel.thread_kwargs[0]["name"]
+        == "Starred V8Bot: C5 Corvette - manual targa #42"
+    )
     assert channel.thread_kwargs[0]["type"].name == "public_thread"
 
 
@@ -148,6 +177,7 @@ def test_discord_digest_sender_reuses_created_thread_for_each_embed() -> None:
     assert len(channel.created_threads) == 1
     assert len(channel.created_threads[0].sent_messages) == 2
     assert channel.created_threads[0].sent_messages[0]["silent"] is True
+    assert channel.created_threads[0].sent_messages[0]["view"].is_persistent()
 
 
 def _listing(listing_id: int) -> DigestListing:
