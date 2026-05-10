@@ -49,12 +49,12 @@ jobs:
           SSH_OPTS="-i /tmp/deploy_key -o StrictHostKeyChecking=no"
 
           scp $SSH_OPTS docker-compose.deploy.yml \
-            "$DEPLOY_USER@$DEPLOY_HOST:~/v8bot/docker-compose.deploy.yml"
+            "$DEPLOY_USER@$DEPLOY_HOST:~/V8Bot/docker-compose.deploy.yml"
 
           ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
             "docker pull $IMAGE_TAG && \
-             docker run --rm --user root -v ~/v8bot/data:/data $IMAGE_TAG chown -R app:app /data && \
-             cd ~/v8bot && \
+             docker run --rm --user root -v ~/V8Bot/data:/data $IMAGE_TAG chown -R app:app /data && \
+             cd ~/V8Bot && \
              IMAGE_TAG=$IMAGE_TAG docker compose -f docker-compose.deploy.yml up -d"
 
           rm /tmp/deploy_key
