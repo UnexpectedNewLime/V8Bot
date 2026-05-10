@@ -289,7 +289,7 @@
       <li><a href="#step3">Step 3 — Tailscale: create an OAuth client</a></li>
       <li><a href="#step4">Step 4 — GitHub: add repository secrets</a></li>
       <li><a href="#step5">Step 5 — GitHub: set GHCR package visibility</a></li>
-      <li><a href="#step6">Step 6 — GitHub: enable branch protection on main</a></li>
+      <li><a href="#step6">Step 6 — GitHub: block direct pushes and enforce CI on main</a></li>
       <li><a href="#verify">Verifying the setup</a></li>
       <li><a href="#ongoing">How future deploys work</a></li>
     </ol>
@@ -485,24 +485,30 @@ cat ~/.ssh/deploy_key.pub >> ~/.ssh/authorized_keys</code></pre>
     <section class="step" id="step6">
       <div class="step-header">
         <div class="step-number">6</div>
-        <div class="step-title">Enable branch protection on main <span class="step-badge badge-github">GitHub</span></div>
+        <div class="step-title">Block direct pushes and enforce CI on main <span class="step-badge badge-github">GitHub</span></div>
       </div>
 
-      <p>This is the key step that allows the deploy workflow to skip running tests. By requiring the CI workflow to pass before any merge to <code>main</code>, the invariant is established: anything on <code>main</code> has already been tested.</p>
+      <p>This step does two things: blocks direct pushes to <code>main</code> so that all changes must go through a pull request, and enforces that CI passes before any PR can be merged. Together these form the guarantee that lets the deploy workflow skip running tests.</p>
 
       <ol>
         <li>Go to the repository → <strong>Settings</strong> → <strong>Branches</strong>.</li>
         <li>Click <strong>Add branch protection rule</strong>.</li>
         <li>Set <em>Branch name pattern</em> to <code>main</code>.</li>
+        <li>Check <strong>Require a pull request before merging</strong>. This is what prevents anyone — including you — from pushing commits directly to <code>main</code>. Every change must arrive via a PR.</li>
         <li>Check <strong>Require status checks to pass before merging</strong>.</li>
-        <li>In the search box, type <code>test</code> and select the <code>test</code> job that appears — this is the job defined in <code>ci.yml</code>. It must have run at least once on this repo for it to appear in the list, so push this branch first if needed.</li>
-        <li>Check <strong>Require branches to be up to date before merging</strong>. This prevents a branch from merging if <code>main</code> has moved forward since the branch was tested.</li>
-        <li>Optionally check <strong>Do not allow bypassing the above settings</strong> to enforce the rule for administrators too.</li>
+        <li>In the search box that appears, type <code>test</code> and select the <code>test</code> job — this is the job defined in <code>ci.yml</code>. It must have run at least once on this repo for it to appear in the list, so open and push a PR first if needed.</li>
+        <li>Check <strong>Require branches to be up to date before merging</strong>. This prevents a PR from merging if <code>main</code> has moved forward since the branch was last tested.</li>
+        <li>Check <strong>Block force pushes</strong>. This prevents the branch history from being rewritten even by someone with admin access.</li>
+        <li>Check <strong>Do not allow bypassing the above settings</strong>. Without this, repository admins can still push directly to <code>main</code> and merge without passing CI.</li>
         <li>Click <strong>Save changes</strong>.</li>
       </ol>
 
       <div class="callout warn">
-        The status check will not appear in the search list until the CI workflow has run at least once. Push a commit to any branch first to trigger it, then come back and configure this rule.
+        The <code>test</code> status check will not appear in the search list until the CI workflow has run at least once. Open a PR from any branch to trigger it, then come back and complete this step.
+      </div>
+
+      <div class="callout">
+        Once this rule is saved, even direct pushes from the command line will be rejected with <em>"protected branch hook declined"</em>. All changes to <code>main</code> must go through a PR with a passing CI run.
       </div>
     </section>
 
