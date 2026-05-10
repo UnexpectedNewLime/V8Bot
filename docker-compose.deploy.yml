@@ -1,0 +1,11 @@
+services:
+  car-watch-bot:
+    image: ghcr.io/unexpectednewlime/v8bot:latest
+    container_name: car-watch-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: sqlite:////data/car_watch_bot.sqlite3
+    volumes:
+      - ./data:/data
