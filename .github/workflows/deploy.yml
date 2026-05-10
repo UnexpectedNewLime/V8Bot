@@ -42,6 +42,7 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          IMAGE_TAG: ghcr.io/unexpectednewlime/v8bot:${{ github.sha }}
         run: |
           echo "$DEPLOY_SSH_KEY" > /tmp/deploy_key
           chmod 600 /tmp/deploy_key
@@ -51,8 +52,9 @@ jobs:
             "$DEPLOY_USER@$DEPLOY_HOST:~/v8bot/docker-compose.deploy.yml"
 
           ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
-            "docker pull ghcr.io/unexpectednewlime/v8bot:latest && \
+            "docker pull $IMAGE_TAG && \
+             docker run --rm --user root -v ~/v8bot/data:/data $IMAGE_TAG chown -R app:app /data && \
              cd ~/v8bot && \
-             docker compose -f docker-compose.deploy.yml up -d"
+             IMAGE_TAG=$IMAGE_TAG docker compose -f docker-compose.deploy.yml up -d"
 
           rm /tmp/deploy_key

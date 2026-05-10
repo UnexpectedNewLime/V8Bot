@@ -1,6 +1,6 @@
 services:
   car-watch-bot:
-    image: ghcr.io/unexpectednewlime/v8bot:latest
+    image: ${IMAGE_TAG:-ghcr.io/unexpectednewlime/v8bot:latest}
     container_name: car-watch-bot
     restart: unless-stopped
     env_file:
