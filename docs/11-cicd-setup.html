@@ -308,7 +308,7 @@
         </thead>
         <tbody>
           <tr>
-            <td><code>.github/workflows/ci.yml</code></td>
+            <td><code>.github/workflows/run-tests.yml</code></td>
             <td>Runs <code>pytest</code> and <code>compileall</code> on every push and pull request to every branch</td>
           </tr>
           <tr>
@@ -496,7 +496,7 @@ cat ~/.ssh/deploy_key.pub >> ~/.ssh/authorized_keys</code></pre>
         <li>Set <em>Branch name pattern</em> to <code>main</code>.</li>
         <li>Check <strong>Require a pull request before merging</strong>. This is what prevents anyone — including you — from pushing commits directly to <code>main</code>. Every change must arrive via a PR.</li>
         <li>Check <strong>Require status checks to pass before merging</strong>.</li>
-        <li>In the search box that appears, type <code>test</code> and select the <code>test</code> job — this is the job defined in <code>ci.yml</code>. It must have run at least once on this repo for it to appear in the list, so open and push a PR first if needed.</li>
+        <li>In the search box that appears, type <code>test</code> and select the <code>test</code> job — this is the job defined in <code>run-tests.yml</code>. It must have run at least once on this repo for it to appear in the list, so open and push a PR first if needed.</li>
         <li>Check <strong>Require branches to be up to date before merging</strong>. This prevents a PR from merging if <code>main</code> has moved forward since the branch was last tested.</li>
         <li>Check <strong>Block force pushes</strong>. This prevents the branch history from being rewritten even by someone with admin access.</li>
         <li>Check <strong>Do not allow bypassing the above settings</strong>. Without this, repository admins can still push directly to <code>main</code> and merge without passing CI.</li>
@@ -558,7 +558,7 @@ docker image ls ghcr.io/unexpectednewlime/v8bot</code></pre>
       <p>No further manual steps are needed. Every merge to <code>main</code> follows this path automatically:</p>
 
       <ol>
-        <li>A PR branch is pushed — <code>ci.yml</code> runs <code>pytest</code> and <code>compileall</code>.</li>
+        <li>A PR branch is pushed — <code>run-tests.yml</code> runs <code>pytest</code> and <code>compileall</code>.</li>
         <li>Branch protection blocks the merge until the <code>test</code> job passes.</li>
         <li>The PR is merged to <code>main</code> — <code>deploy.yml</code> triggers.</li>
         <li>The Docker image is built and pushed to GHCR tagged <code>:latest</code> and <code>:&lt;sha&gt;</code>.</li>
@@ -572,7 +572,7 @@ docker image ls ghcr.io/unexpectednewlime/v8bot</code></pre>
   </div>
 
   <footer>
-    V8Bot · <code>.github/workflows/ci.yml</code> · <code>.github/workflows/deploy.yml</code> · <code>docker-compose.deploy.yml</code>
+    V8Bot · <code>.github/workflows/run-tests.yml</code> · <code>.github/workflows/deploy.yml</code> · <code>docker-compose.deploy.yml</code>
   </footer>
 
 </div>
