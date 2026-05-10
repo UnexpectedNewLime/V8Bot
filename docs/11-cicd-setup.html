@@ -286,10 +286,11 @@
       <li><a href="#whats-in-the-repo">What is already in the repo</a></li>
       <li><a href="#step1">Step 1 — Server: create the deployment directory</a></li>
       <li><a href="#step2">Step 2 — Server: generate a deploy SSH key</a></li>
-      <li><a href="#step3">Step 3 — Tailscale: create an OAuth client</a></li>
-      <li><a href="#step4">Step 4 — GitHub: add repository secrets</a></li>
-      <li><a href="#step5">Step 5 — GitHub: set GHCR package visibility</a></li>
-      <li><a href="#step6">Step 6 — GitHub: block direct pushes and enforce CI on main</a></li>
+      <li><a href="#step3">Step 3 — Server: install Tailscale</a></li>
+      <li><a href="#step4">Step 4 — Tailscale: create an OAuth client</a></li>
+      <li><a href="#step5">Step 5 — GitHub: add repository secrets</a></li>
+      <li><a href="#step6">Step 6 — GitHub: set GHCR package visibility</a></li>
+      <li><a href="#step7">Step 7 — GitHub: block direct pushes and enforce CI on main</a></li>
       <li><a href="#verify">Verifying the setup</a></li>
       <li><a href="#ongoing">How future deploys work</a></li>
     </ol>
@@ -323,7 +324,7 @@
       </table>
 
       <div class="callout">
-        The deploy workflow contains no test job. It relies on branch protection (Step 6) to guarantee that only tested code reaches <code>main</code>, avoiding duplicate test runs and preventing flaky tests from blocking live deployments.
+        The deploy workflow contains no test job. It relies on branch protection (Step 7) to guarantee that only tested code reaches <code>main</code>, avoiding duplicate test runs and preventing flaky tests from blocking live deployments.
       </div>
     </section>
 
@@ -374,7 +375,7 @@ ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/deploy_key -N ""
 <span class="comment"># Authorise the public key on this server</span>
 cat ~/.ssh/deploy_key.pub >> ~/.ssh/authorized_keys</code></pre>
 
-      <p>Print the private key — you will paste this into a GitHub secret in Step 4:</p>
+      <p>Print the private key — you will paste this into a GitHub secret in Step 5:</p>
 
       <pre><code>cat ~/.ssh/deploy_key</code></pre>
 
@@ -385,6 +386,40 @@ cat ~/.ssh/deploy_key.pub >> ~/.ssh/authorized_keys</code></pre>
     <section class="step" id="step3">
       <div class="step-header">
         <div class="step-number">3</div>
+        <div class="step-title">Install Tailscale on the server <span class="step-badge badge-server">Server</span></div>
+      </div>
+
+      <p>The deploy workflow reaches the server through its Tailscale IP or hostname. The server must be enrolled in your Tailscale network before you configure the deploy secrets.</p>
+
+      <p><strong>Install Tailscale:</strong></p>
+
+      <pre><code>curl -fsSL https://tailscale.com/install.sh | sh</code></pre>
+
+      <p><strong>Authenticate to your Tailscale network:</strong></p>
+
+      <pre><code>sudo tailscale up</code></pre>
+
+      <p>This prints a URL — open it in a browser and log in with your Tailscale account. The server will appear in the admin console under <strong>Machines</strong> once authenticated.</p>
+
+      <p><strong>Enable Tailscale to start on boot (if not already enabled by the installer):</strong></p>
+
+      <pre><code>sudo systemctl enable --now tailscaled</code></pre>
+
+      <p><strong>Find the machine name and IP:</strong></p>
+
+      <pre><code>tailscale status</code></pre>
+
+      <p>Note the machine name (e.g. <code>my-server</code>) or the <code>100.x.x.x</code> IP — you will paste one of these as the <code>DEPLOY_HOST</code> secret in Step 5. Using the machine name is preferred because it stays stable even if the IP changes.</p>
+
+      <div class="callout">
+        SSH must be allowed from the <code>tag:ci</code> node in your Tailscale ACL. If you use the default ACL (<em>allow all</em>) this is automatic. If you have a custom ACL, add a rule permitting <code>tag:ci → [this server] : 22</code>.
+      </div>
+    </section>
+
+    <!-- Step 4 -->
+    <section class="step" id="step4">
+      <div class="step-header">
+        <div class="step-number">4</div>
         <div class="step-title">Create a Tailscale OAuth client <span class="step-badge badge-ts">Tailscale</span></div>
       </div>
 
@@ -411,10 +446,10 @@ cat ~/.ssh/deploy_key.pub >> ~/.ssh/authorized_keys</code></pre>
       </div>
     </section>
 
-    <!-- Step 4 -->
-    <section class="step" id="step4">
+    <!-- Step 5 -->
+    <section class="step" id="step5">
       <div class="step-header">
-        <div class="step-number">4</div>
+        <div class="step-number">5</div>
         <div class="step-title">Add repository secrets <span class="step-badge badge-github">GitHub</span></div>
       </div>
 
@@ -430,11 +465,11 @@ cat ~/.ssh/deploy_key.pub >> ~/.ssh/authorized_keys</code></pre>
         <tbody>
           <tr>
             <td><code>TAILSCALE_OAUTH_CLIENT_ID</code></td>
-            <td>Client ID from Step 3</td>
+            <td>Client ID from Step 4</td>
           </tr>
           <tr>
             <td><code>TAILSCALE_OAUTH_CLIENT_SECRET</code></td>
-            <td>Client secret from Step 3</td>
+            <td>Client secret from Step 4</td>
           </tr>
           <tr>
             <td><code>DEPLOY_HOST</code></td>
@@ -456,10 +491,10 @@ cat ~/.ssh/deploy_key.pub >> ~/.ssh/authorized_keys</code></pre>
       </div>
     </section>
 
-    <!-- Step 5 -->
-    <section class="step" id="step5">
+    <!-- Step 6 -->
+    <section class="step" id="step6">
       <div class="step-header">
-        <div class="step-number">5</div>
+        <div class="step-number">6</div>
         <div class="step-title">Set GHCR package visibility <span class="step-badge badge-github">GitHub</span></div>
       </div>
 
@@ -481,10 +516,10 @@ cat ~/.ssh/deploy_key.pub >> ~/.ssh/authorized_keys</code></pre>
       <p>Docker will store the credential in the server's credential store and use it automatically on subsequent pulls.</p>
     </section>
 
-    <!-- Step 6 -->
-    <section class="step" id="step6">
+    <!-- Step 7 -->
+    <section class="step" id="step7">
       <div class="step-header">
-        <div class="step-number">6</div>
+        <div class="step-number">7</div>
         <div class="step-title">Block direct pushes and enforce CI on main <span class="step-badge badge-github">GitHub</span></div>
       </div>
 
