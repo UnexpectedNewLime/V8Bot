@@ -1,0 +1,65 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Podman
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            podman login ghcr.io \
+              --username "${{ github.actor }}" \
+              --password-stdin
+
+      - name: Build and push image
+        run: |
+          podman build \
+            --tag ghcr.io/unexpectednewlime/v8bot:latest \
+            --tag ghcr.io/unexpectednewlime/v8bot:${{ github.sha }} \
+            .
+          podman push ghcr.io/unexpectednewlime/v8bot:latest
+          podman push ghcr.io/unexpectednewlime/v8bot:${{ github.sha }}
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TAILSCALE_OAUTH_CLIENT_SECRET }}
+          tags: tag:ci
+
+      - name: Copy compose file and deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          IMAGE_TAG: ghcr.io/unexpectednewlime/v8bot:${{ github.sha }}
+        run: |
+          echo "$DEPLOY_SSH_KEY" > /tmp/deploy_key
+          chmod 600 /tmp/deploy_key
+          SSH_OPTS="-i /tmp/deploy_key -o StrictHostKeyChecking=no"
+
+          scp $SSH_OPTS docker-compose.deploy.yml \
+            "$DEPLOY_USER@$DEPLOY_HOST:~/V8Bot/docker-compose.deploy.yml"
+
+          ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
+            "podman pull $IMAGE_TAG && \
+             podman run --rm --user root -v ~/V8Bot/data:/data $IMAGE_TAG chown -R app:app /data && \
+             cd ~/V8Bot && \
+             IMAGE_TAG=$IMAGE_TAG podman-compose -f docker-compose.deploy.yml up -d"
+
+          rm /tmp/deploy_key
